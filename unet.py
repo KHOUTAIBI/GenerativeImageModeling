@@ -1,117 +1,142 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-import numpy as np
-import math
-import copy 
+from blocks import Downsampling, Middle, Upsampling, time_embedding
 
-# The UNET class as in the DDPM/DDIM paper
+
 class Unet(nn.Module):
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
+    """
+    U-Net backbone used in diffusion models (DDPM/DDIM style).
 
+    Expects blocks:
+        - Downsampling
+        - Middle
+        - Upsampling
+        - time_embedding
+    defined in blocks.py.
+    """
 
+    def __init__(self, model_config):
+        super().__init__()
 
-# Sinusoidal Time Embedding
-def time_embedding(time_steps, embedding_dim):
-    
-    device = time_steps.device
-    half_dim = embedding_dim // 2
-    emb_scale = np.log(10000) / (half_dim - 1)
-    emb = torch.exp(torch.arange(half_dim, device=device) * -emb_scale)
-    emb = time_steps[:, None] * emb[None, :]
-    emb = torch.cat([torch.sin(emb), torch.cos(emb)], dim=1)
-    return emb
+        im_channels = model_config["im_channels"]
+        self.down_channels = model_config["down_channels"]
+        self.mid_channels = model_config["mid_channels"]
+        self.time_embed_dim = model_config["time_emb_dim"]
+        self.down_sample = model_config["down_sample"]
+        self.num_down_layers = model_config["num_down_layers"]
+        self.num_mid_layers = model_config["num_mid_layers"]
+        self.num_up_layers = model_config["num_up_layers"]
 
-# Downsampling class
-class Downsampling(nn.Module):
-    def __init__(self, 
-                 in_channels,
-                 out_channels,
-                 embedding_dim,
-                 down_sample = True,
-                 num_heads = 4,
-                 num_layers = 1,
-                 *args, 
-                 **kwargs) -> None:
-        super().__init__(*args, **kwargs)
+        # basic consistency checks
+        assert self.mid_channels[0] == self.down_channels[-1]
+        assert self.mid_channels[-1] == self.down_channels[-2]
+        assert len(self.down_sample) == len(self.down_channels) - 1
 
-        # params
-        self.in_channels = in_channels
-        self.out_channels = out_channels
-        self.embedding_dim = embedding_dim,
-        self.down_sample = down_sample
-        self.num_heads = num_heads
-        self.num_layers = num_layers
+        # time embedding projection
+        self.time_proj = nn.Sequential(
+            nn.Linear(self.time_embed_dim, self.time_embed_dim),
+            nn.SiLU(),
+            nn.Linear(self.time_embed_dim, self.time_embed_dim),
+        )
 
-        # layers, we do noot change the dimensions of the layers, as kernel = 3 and padidng = 1
-        self.unet_first_conv = nn.ModuleList([
-                nn.Sequential(
-                    nn.GroupNorm(8, in_channels if i == 0 else out_channels),
-                    nn.ReLU(),
-                    nn.Conv2d(in_channels=in_channels if i == 0 else out_channels, out_channels=out_channels, kernel_size=3, padding = 1, stride = 1),                         
-            ) for i in range(num_layers)])
+        # first convolution
+        self.conv_in = nn.Conv2d(
+            in_channels=im_channels,
+            out_channels=self.down_channels[0],
+            kernel_size=3,
+            padding=1
+        )
 
-        self.unet_second_convolution = nn.ModuleList([
-                nn.Sequential(
-                    nn.GroupNorm(8, out_channels),
-                    nn.ReLU(),
-                    nn.Conv2d(out_channels, out_channels, kernel_size = 3, padding=1)
-            ) for _ in range(num_layers)])
+        # encoder
+        self.downs = nn.ModuleList()
+        for i in range(len(self.down_channels) - 1):
+            self.downs.append(
+                Downsampling(
+                    in_channels=self.down_channels[i],
+                    out_channels=self.down_channels[i + 1],
+                    embedding_dim=self.time_embed_dim,
+                    down_sample=self.down_sample[i],
+                    num_layers=self.num_down_layers,
+                )
+            )
 
-        self.downsample_layer = nn.Conv2d(in_channels=out_channels, out_channels = out_channels, kernel_size=4, stride = 2, padding = 0)\
-            if self.down_sample else nn.Identity()        
+        # bottleneck
+        self.mids = nn.ModuleList()
+        for i in range(len(self.mid_channels) - 1):
+            self.mids.append(
+                Middle(
+                    in_channels=self.mid_channels[i],
+                    out_channels=self.mid_channels[i + 1],
+                    time_embed_dim=self.time_embed_dim,
+                    num_layers=self.num_mid_layers,
+                )
+            )
 
-        # Attention heads and self attention, residuals and time mebeddings
-        self.attention_norms = nn.ModuleList([
-            nn.GroupNorm(8, out_channels) for _ in range(num_layers)])
+        # decoder
+        self.ups = nn.ModuleList()
+        for i in reversed(range(len(self.down_channels) - 1)):
+            in_ch = self.down_channels[i] * 2  # skip concat
+            out_ch = self.down_channels[i - 1] if i > 0 else self.down_channels[0]
 
-        self.attentions = nn.ModuleList([
-            nn.MultiheadAttention(out_channels, num_heads, batch_first=True) for _ in range(num_layers)])
-        
-        self.residual_input_conv = nn.ModuleList([
-            nn.Conv2d(in_channels if i == 0 else out_channels, out_channels, 1)
-            for i in range(num_layers)])
+            self.ups.append(
+                Upsampling(
+                    in_channels=in_ch,
+                    out_channels=out_ch,
+                    time_embed_dim=self.time_embed_dim,
+                    up_sample=self.down_sample[i],
+                    num_layers=self.num_up_layers,
+                )
+            )
 
-        self.time_embedding_layers = nn.ModuleList([
-            nn.Sequential(
-                nn.ReLU(),
-                nn.Linear(embedding_dim, out_channels)
-            ) for _ in range(num_layers)
-        ])
-        
-    def forward(self, x, embedding):
-        
-        # Forward
-        output = x
-        for i in range(self.num_layers):
-            # First conv
-            unet_input = output
-            output = self.unet_first_conv[i](unet_input)
-            output = output + self.time_embedding_layers[i](embedding)[:, :, None, None]
-            # Second conv
-            output = self.unet_second_convolution[i](output)
-            output = output + self.residual_input_conv[i](unet_input)
+        # output projection
+        self.norm_out = nn.GroupNorm(8, self.down_channels[0])
+        self.act_out = nn.SiLU()
+        self.conv_out = nn.Conv2d(
+            in_channels=self.down_channels[0],
+            out_channels=im_channels,
+            kernel_size=3,
+            padding=1
+        )
 
-            # Attention
-            attn_input = self.attention_norms[i](output)
-            B, C, H, W = attn_input.shape
-            attn_input = attn_input.view(B, C, H * W).transpose(1, 2)
-            attn_out, _ = self.attentions[i](attn_input, attn_input, attn_input)
-            attn_out = attn_out.transpose(1, 2).view(B, C, H, W)
-            output = output + attn_out
+    def forward(self, x, t):
+        """
+        x : (B, C, H, W) noisy image
+        t : diffusion timestep (B,)
+        """
 
-        downsampled_image = self.downsample_layer(output) # either downsample or not
-        return downsampled_image
-    
+        # initial projection
+        out = self.conv_in(x)
 
-class Middle(nn.Module):
-    def __init__(self, 
-                 in_channels,
-                out_channels,
-                time_embed_dim,
-                num_heads = 4,
-                num_layers = 1,
-                 *args, 
-                 **kwargs) -> None:
-        super().__init__(*args, **kwargs)   
+        # prepare timestep embedding
+        if not torch.is_tensor(t):
+            t = torch.tensor(t, device=x.device)
+
+        t = t.to(x.device).long()
+
+        if t.dim() == 0:
+            t = t.unsqueeze(0).repeat(x.shape[0])
+
+        t_emb = time_embedding(t, self.time_embed_dim)
+        t_emb = self.time_proj(t_emb)
+
+        # encoder
+        skip_connections = []
+        for down in self.downs:
+            skip_connections.append(out)
+            out = down(out, t_emb)
+
+        # bottleneck
+        for mid in self.mids:
+            out = mid(out, t_emb)
+
+        # decoder
+        for up in self.ups:
+            skip = skip_connections.pop()
+            out = up(out, skip, t_emb)
+
+        # output layer
+        out = self.norm_out(out)
+        out = self.act_out(out)
+        out = self.conv_out(out)
+
+        return out
