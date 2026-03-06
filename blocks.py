@@ -65,7 +65,7 @@ class Downsampling(nn.Module):
 
         # spatial downsampling
         self.downsample_layer = (
-            nn.Conv2d(out_channels, out_channels, kernel_size=4, stride=2)
+            nn.Conv2d(out_channels, out_channels, kernel_size=4, stride=2, padding = 1)
             if self.down_sample else nn.Identity()
         )
 
