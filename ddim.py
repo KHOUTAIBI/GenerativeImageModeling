@@ -24,6 +24,8 @@ def get_alpha_cumprod(scheduler):
         return scheduler.alphas_cumprod
     if hasattr(scheduler, "alpha_cumulative"):
         return scheduler.alpha_cumulative
+    if hasattr(scheduler, "alpha_bar"):
+        return scheduler.alpha_bar
     raise AttributeError("Could not find alpha cumulative product in scheduler.")
 
 
@@ -45,12 +47,17 @@ def train(args):
     dataset_config = config['dataset_config']
     model_config = config['model_config']
     train_config = config['train_config']
+    load = train_config['load']
+
 
     mnist_trainset = datasets.MNIST(
         root='./data',
         train=True,
         download=True,
-        transform=transforms.ToTensor()
+        transform=transforms.Compose([
+                transforms.ToTensor(),
+                transforms.Lambda(lambda x: 2 * x - 1)
+                    ])
     )
 
     mnist_loader = DataLoader(
@@ -60,6 +67,7 @@ def train(args):
         num_workers=4
     )
 
+
     scheduler = NoiseScheduler(
         num_timesteps=diffusion_config['num_timesteps'],
         beta_init=diffusion_config['beta_init'],
@@ -67,6 +75,8 @@ def train(args):
     )
 
     model = Unet(model_config).to(device)
+    if load :
+        model.load_state_dict(torch.load(train_config['ckpt_name']))
     model.train()
 
     criterion = nn.MSELoss()
@@ -98,7 +108,7 @@ def train(args):
             optimizer.step()
 
         print(f"Finished epoch {epoch+1}/{num_epochs} | Loss: {np.mean(losses):.4f}")
-        torch.save(model.state_dict(), f'./saves/ddim_chkpt_{epoch}.pth')
+        torch.save(model.state_dict(), f'./saves/ddim_mnist_chkpt_final.pth')
 
     print("Finished training!")
 
@@ -183,7 +193,7 @@ def sample(model, scheduler, train_config, model_config, diffusion_config):
         grid = make_grid(ims, nrow=train_config['num_grid_rows'])
         img = torchvision.transforms.ToPILImage()(grid)
 
-        if idx % 10 == 0 or idx == len(timesteps) - 1:
+        if idx % 100 == 0 or idx == len(timesteps) - 1:
             img.save(f'./samples/sample_step_{idx}.png')
             img.close()
 

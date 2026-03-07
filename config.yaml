@@ -1,30 +1,32 @@
-dataset_config :
-  im_path = './'
+dataset_config:
+  im_path: './data'
 
 diffusion_config:
-  num_timesteps : 1000
-  beta_init : 0.0001
-  beta_end : 0.02
-
+  num_timesteps: 1000
+  beta_init: 0.0001
+  beta_end: 0.02
+  num_inference_steps: 100
+  eta: 0.2
 
 model_config:
-  save_path : './saves/'
-  im_channels : 1
-  im_size : 28
-  down_channels : [32, 64, 128, 256]
-  mid_channels : [256, 256, 128]
-  down_sample : [True, True, False]
-  time_emb_dim : 128
-  num_down_layers : 2
-  num_mid_layers : 2
-  num_up_layers : 2
-  num_heads : 4
+  save_path: './saves/ddim_chkpt_final.pth'
+  im_channels: 1
+  im_size: 28
+  down_channels: [32, 64, 128, 256]
+  mid_channels: [256, 256, 128]
+  down_sample: [True, True, False]
+  time_emb_dim: 128
+  num_down_layers: 2
+  num_mid_layers: 2
+  num_up_layers: 2
+  num_heads: 4
 
 train_config:
-  task_name: 'default'
-  batch_size: 64
-  num_epochs: 5
-  num_samples : 100
-  num_grid_rows : 10
-  lr: 0.0001
-  ckpt_name: 'ddim_mnist.pth'
+  load: False
+  task_name: 'mnist_ddim'
+  batch_size: 128
+  num_epochs: 50
+  num_samples: 100
+  num_grid_rows: 10
+  lr: 0.0002
+  ckpt_name: './saves/ddim_chkpt_final.pth'
