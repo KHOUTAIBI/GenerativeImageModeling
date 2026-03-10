@@ -107,7 +107,6 @@ def pseudoinverse_guided_sample(
     num_inference_steps = diffusion_config.get("num_inference_steps", 50)
     
     eta = diffusion_config.get("eta", 0.0)
-    guidance_scale = diffusion_config.get("guidance_scale", 1.0)
 
     timesteps = np.linspace(0, num_train_steps - 1, num_inference_steps, dtype=int)[::-1]
 
@@ -136,7 +135,7 @@ def pseudoinverse_guided_sample(
 
         x_ddim = ddim_step_from_x0_eps(x0_hat, eps_theta, alpha_bar_t, alpha_bar_s, eta)
 
-        x = x_ddim + guidance_scale * torch.sqrt(alpha_bar_t) * guidance
+        x = x_ddim + torch.sqrt(alpha_bar_t) * guidance
 
         x = torch.nan_to_num(x, nan=0.0, posinf=1.0, neginf=-1.0)
         x = x.detach()
