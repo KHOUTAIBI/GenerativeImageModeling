@@ -107,7 +107,7 @@ def pseudoinverse_guided_sample(
     num_inference_steps = diffusion_config.get("num_inference_steps", 50)
     
     eta = diffusion_config.get("eta", 0.0)
-    guidance_scale = diffusion_config.get("guidance_scale", 1e-4)
+    guidance_scale = diffusion_config.get("guidance_scale", 1.0)
 
     timesteps = np.linspace(0, num_train_steps - 1, num_inference_steps, dtype=int)[::-1]
 
@@ -195,7 +195,6 @@ def run(args):
     )
 
     idx = image_index
-    img_pil = Image.open('ffhq256-1k-validation/' + str(idx).zfill(5) + '.png')
     x0 = im2tensor(plt.imread('ffhq256-1k-validation/' + str(idx).zfill(5) + '.png')).to(device)
     imgshape = x0.shape
 
@@ -205,7 +204,6 @@ def run(args):
     corner_top, corner_left = h // 4, int(0.45 * w)
     mask = torch.ones(imgshape, device=device)
     mask[:, :, corner_top:corner_top + hcrop, corner_left:corner_left + wcrop] = 0
-
 
     operator = LinearOperator(
         image_shape=imgshape,
@@ -219,8 +217,7 @@ def run(args):
     noise = torch.normal(0.0, std = sigma_noise, size = x0.size(), device=device)
     y = operator.H(x0.clone()) + noise
 
-    with torch.no_grad():
-        x_init = y
+    x_init = torch.randn_like(y, device=device, requires_grad=True)
 
     save_grid(x_init, args.pinv_init_path, nrow=train_config["num_grid_rows"])
 
