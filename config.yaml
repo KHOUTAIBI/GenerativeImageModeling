@@ -4,14 +4,14 @@ diffusion_config:
   beta_end: 0.02
   num_inference_steps: 100
   eta: 0.0
-  sigma_y: 0.01
+  sigma_y: 0.02
   guidance_scale: 0.1
-  sampler: dps
+  sampler: ddim
 
 model_config:
   im_channels: 3
   im_size: 256
 
 train_config:
-  image_index: 462
+  image_index: 500
   num_grid_rows: 1

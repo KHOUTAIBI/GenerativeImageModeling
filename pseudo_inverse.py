@@ -8,46 +8,11 @@ import numpy as np
 import matplotlib.pyplot as plt
 from guided_diffusion.unet import create_model
 from utils import *
+from operators import *
 from noise_scheduler import NoiseScheduler
 from torchvision.utils import make_grid
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-
-class LinearOperator:
-    def __init__(self, image_shape, measurement_dim, device="cpu"):
-        self.image_shape = image_shape
-        self.n = int(np.prod(image_shape))
-        self.m = measurement_dim
-        self.device = device
-
-        _, C, H, W = image_shape
-
-        hcrop, wcrop = H // 4, W // 2
-        corner_top, corner_left = H // 2, int(0.45 * W)
-
-        mask = torch.ones(image_shape, device=device)
-        mask[:, :, corner_top:corner_top + hcrop, corner_left:corner_left + wcrop] = 0
-        self.mask = mask.to(device)
-
-    def flatten(self, x):
-        return x.view(x.shape[0], -1)
-
-    def unflatten(self, x):
-        return x.view(x.shape[0], *self.image_shape)
-
-    def H(self, x):
-        return x * self.mask
-
-    def H_pinv(self, y):
-        return y * self.mask
-
-    @torch.no_grad()
-    def observe(self, x0, sigma_y=0.0):
-        y = self.H(x0)
-        if sigma_y > 0:
-            y = y + sigma_y * self.mask * torch.randn_like(x0)
-        return y
 
 
 def predict_x0_from_eps(x_t, eps_theta, alpha_t):
@@ -91,6 +56,7 @@ def pseudoinverse_guided_sample_ddim(
     scheduler: NoiseScheduler,
     diffusion_config,
     operator,
+    x0,
     y,
 ):
     model.eval()
@@ -104,6 +70,8 @@ def pseudoinverse_guided_sample_ddim(
 
     timesteps = np.linspace(0, num_train_steps - 1, num_inference_steps, dtype=int)[::-1]
     x = torch.randn_like(y, device=y.device)
+
+    psnr_list = list()
 
     alpha = scheduler.alpha_bar.to(y.device)
 
@@ -137,17 +105,20 @@ def pseudoinverse_guided_sample_ddim(
         x = x_ddim + guidance_scale * torch.sqrt(alpha_t) * guidance
 
         x = torch.nan_to_num(x, nan=0.0, posinf=1.0, neginf=-1.0).detach()
+        psnr_x = psnr(x0, x)
+        psnr_list.append(psnr_x)
 
         if i % 25 == 0:
             save_grid(x, path=f"./samples/pigdm_ddim_output_{i}.png")
 
-    return x
+    return x, psnr_list
 
 
 def pseudoinverse_guided_sample_ddpm(
     model,
     diffusion_config,
     operator,
+    x0,
     y
 ):
     model.eval()
@@ -162,6 +133,8 @@ def pseudoinverse_guided_sample_ddpm(
     alpha = 1.0 - beta
     alphabar = torch.cumprod(alpha, dim=0)
     betabar = 1.0 - alphabar
+
+    psnr_list = list()
 
     batch_size = y.shape[0]
     reversed_time_steps = np.arange(num_train_steps)[::-1]
@@ -197,15 +170,19 @@ def pseudoinverse_guided_sample_ddpm(
         x = mu + torch.sqrt(torch.clamp(beta[t], min=0.0)) * z + guidance_scale * torch.sqrt(torch.clamp(alphabar[t], min=1e-12)) * guidance
         x = torch.nan_to_num(x, nan=0.0, posinf=1.0, neginf=-1.0).detach()
 
+        psnr_x = psnr(x0, x)
+        psnr_list.append(psnr_x)
+
         if i % 100 == 0:
             save_grid(x, path=f"./samples/pigdm_ddpm_output_{i}.png")
 
-    return x
+    return x, psnr_list
 
 def dps_sample_diffsion(
-      model,
+    model,
     diffusion_config,
     operator,
+    x0,
     y  
 ):
     
@@ -221,6 +198,8 @@ def dps_sample_diffsion(
     alpha = 1.0 - beta
     alphabar = torch.cumprod(alpha, dim=0)
     betabar = 1.0 - alphabar
+
+    psnr_list = list()
 
     batch_size = y.shape[0]
     reversed_time_steps = np.arange(num_train_steps)[::-1]
@@ -248,10 +227,13 @@ def dps_sample_diffsion(
         x = mu + torch.sqrt(torch.clamp(beta[t], min=0.0)) * z - guidance_scale * grad / torch.sqrt(error)
         x = torch.nan_to_num(x, nan=0.0, posinf=1.0, neginf=-1.0).detach()
 
+        psnr_x = psnr(x0, x)
+        psnr_list.append(psnr_x)
+
         if i % 100 == 0:
             save_grid(x, path=f"./samples/dps_ddpm_output_{i}.png")
 
-    return x
+    return x, psnr_list
 
 
 def save_grid(x, path, nrow=8):
@@ -324,32 +306,42 @@ def run(args):
     x_init = torch.randn_like(y)
     save_grid(x_init, args.pinv_init_path, nrow=train_config["num_grid_rows"])
 
-    if diffusion_config.get("sampler", "ddim").lower() == "ddpm":
-        x_rec = pseudoinverse_guided_sample_ddpm(
+    sampler = diffusion_config.get("sampler", "ddim").lower()
+
+    if sampler == "ddpm":
+        x_rec, psnr_list = pseudoinverse_guided_sample_ddpm(
             model=model,
             diffusion_config=diffusion_config,
             operator=operator,
+            x0 = x0,
             y=y,
         )
-    elif diffusion_config.get("sampler", "ddim").lower() == "ddim":
-        x_rec = pseudoinverse_guided_sample_ddim(
+    elif sampler == "ddim":
+        x_rec, psnr_list = pseudoinverse_guided_sample_ddim(
             model=model,
             scheduler=scheduler,
             diffusion_config=diffusion_config,
             operator=operator,
+            x0 = x0,
             y=y,
         )
 
     else :
-        x_rec = dps_sample_diffsion(
+        x_rec, psnr_list = dps_sample_diffsion(
             model=model,
             diffusion_config=diffusion_config,
             operator=operator,
+            x0 = x0,
             y=y,
         )
 
     os.makedirs(os.path.dirname(args.output_path), exist_ok=True)
     save_grid(x_rec, args.output_path, nrow=train_config["num_grid_rows"])
+    plt.plot(np.arange(len(psnr_list)), psnr_list)
+    plt.grid()
+    plt.xlabel("Step")
+    plt.ylabel("PSNR")
+    plt.savefig(args.psnr_path + f"_{sampler}.png")
     print(f"Saved reconstruction grid to: {args.output_path}")
 
 
@@ -361,6 +353,7 @@ if __name__ == "__main__":
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--output_path", type=str, default="./samples/pigdm_randomH.png")
     parser.add_argument("--pinv_init_path", type=str, default="./samples/pinv_init.png")
+    parser.add_argument("--psnr_path", type=str, default="./samples/psnr")
     args = parser.parse_args()
 
     torch.manual_seed(args.seed)
