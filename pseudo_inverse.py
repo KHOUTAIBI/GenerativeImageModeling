@@ -5,11 +5,9 @@ import argparse
 import torch
 import torchvision
 import numpy as np
-import torchvision.transforms as transforms
-from torch.utils.data import DataLoader
-import torchvision.datasets as datasets
-
-from unet import Unet
+from guided_diffusion.unet import create_model
+from PIL import Image
+from utils import *
 from noise_scheduler import NoiseScheduler
 from torchvision.utils import make_grid
 
@@ -61,7 +59,7 @@ def predict_x0_from_eps(x_t, eps_theta, alpha_bar_t):
 
 
 def compute_pseudoinverse_guidance(x_t, x0_hat, y, operator):
-    mat = operator.H_pinv(y) - operator.H_pinv(operator.H(x0_hat))
+    mat = operator(y) - operator(operator(x0_hat))
     inner = (mat.detach() * x0_hat).sum()
     guidance = torch.autograd.grad(inner, x_t, retain_graph=False, create_graph=False)[0]
     return guidance
@@ -89,7 +87,6 @@ def pseudoinverse_guided_sample(
     scheduler,
     model_config,
     diffusion_config,
-    train_config,
     operator,
     y,
 ):
@@ -105,25 +102,19 @@ def pseudoinverse_guided_sample(
 
     timesteps = np.linspace(0, num_train_steps - 1, num_inference_steps, dtype=int)[::-1]
 
-    x = torch.randn(
-        batch_size,
-        im_channels,
-        im_size,
-        im_size,
-        device=device
-    )
+    x = torch.randn_like(y, device = y.device)
 
     alpha_bar = scheduler.alpha_bar.to(device)
 
-    for i, t in enumerate(tqdm.tqdm(timesteps, desc="PiGDM sampling")):
+    for i, t in enumerate(tqdm(timesteps, desc="PiGDM sampling")):
         s = timesteps[i + 1] if i + 1 < len(timesteps) else 0
 
         t_batch = torch.full((batch_size,), t, device=device, dtype=torch.long)
 
         x = x.detach()
         x.requires_grad_(True)
-
-        eps_theta = model(x, t_batch)
+        # print(x.size(), t_batch.size())
+        eps_theta = model(x, t_batch)[:,:3,:,:]
 
         alpha_bar_t = alpha_bar[t].view(1, 1, 1, 1)
         alpha_bar_s = alpha_bar[s].view(1, 1, 1, 1)
@@ -156,9 +147,28 @@ def run(args):
     diffusion_config = config["diffusion_config"]
     model_config = config["model_config"]
     train_config = config["train_config"]
+    image_index = train_config['image_index']
 
-    model = Unet(model_config).to(device)
-    model.load_state_dict(torch.load(model_config["save_path"], map_location=device))
+    config = {'image_size': 256,
+                'num_channels': 128,
+                'num_res_blocks': 1,
+                'channel_mult': '',
+                'learn_sigma': True,
+                'class_cond': False,
+                'use_checkpoint': False,
+                'attention_resolutions': 16,
+                'num_heads': 4,
+                'num_head_channels': 64,
+                'num_heads_upsample': -1,
+                'use_scale_shift_norm': True,
+                'dropout': 0.0,
+                'resblock_updown': True,
+                'use_fp16': False,
+                'use_new_attention_order': False,
+                'model_path': './ffhq_10m.pt'}
+    
+    model = create_model(**config)
+    model = model.to(device)
     model.eval()
 
     scheduler = NoiseScheduler(
@@ -168,52 +178,38 @@ def run(args):
         device=device,
     )
 
-    mnist_trainset = datasets.MNIST(
-        root='./data',
-        train=True,
-        download=True,
-        transform=transforms.Compose([
-                transforms.ToTensor(),
-                transforms.Lambda(lambda x: 2 * x - 1)
-                    ])
-    )
+    idx = image_index
+    img_pil = Image.open('ffhq256-1k-validation/'+str(idx).zfill(5)+'.png')
+    x0 = im2tensor(plt.imread('ffhq256-1k-validation/'+str(idx).zfill(5)+'.png'))
+    imgshape = x0.shape
 
-    mnist_loader = DataLoader(
-        mnist_trainset,
-        batch_size=train_config['batch_size'],
-        shuffle=True,
-        num_workers=4
-    )
+    h = imgshape[2]
+    w = imgshape[3]
+    hcrop, wcrop = h//2, w//2
+    corner_top, corner_left = h//4, int(0.45*w)
+    mask = torch.ones(imgshape, device=device)
+    mask[:,:,corner_top:corner_top+hcrop,corner_left:corner_left+wcrop] = 0
 
-    image_shape = (
-        model_config["im_channels"],
-        model_config["im_size"],
-        model_config["im_size"],
-    )
+    # operator = LinearOperator(
+    #     image_shape=imgshape,
+    #     measurement_dim=0.0,
+    #     seed=args.seed,
+    #     mask_ratio=0.5,
+    #     device=device,
+    # )
 
-    n = int(np.prod(image_shape))
-    m = args.measurement_dim if args.measurement_dim is not None else n // 4
+    def linear_operator(x):
+        x = x*mask
+        return(x)
 
-    operator = LinearOperator(
-        image_shape=image_shape,
-        measurement_dim=m,
-        seed=args.seed,
-        mask_ratio=0.5,
-        device=device,
-    )
+    x_true = x0.clone()
 
-    batch_size = args.batch_size if args.batch_size is not None else train_config["batch_size"]
-    
-    # Here y is a random measurement vector.
-    indx = np.random.randint(low = 0, high = mnist_trainset.__len__())
-    x_true, _ = mnist_trainset.__getitem__(index = indx)
-    x_true = x_true.to(device)
-    y = operator.observe(x_true)
-    noise = torch.normal(mean = 0.0, std = 0.05, size=y.size(), device=device)
-    y = y + noise
+    sigma_noise = 2*10/255
+
+    y = linear_operator(x_true.clone()) + sigma_noise * mask * torch.randn_like(x_true)
 
     with torch.no_grad():
-        x_init = operator.H_pinv(y)
+        x_init = linear_operator(y)
     save_grid(x_init, args.pinv_init_path, nrow=train_config["num_grid_rows"])
 
     x_rec = pseudoinverse_guided_sample(
@@ -221,8 +217,7 @@ def run(args):
         scheduler=scheduler,
         model_config=model_config,
         diffusion_config=diffusion_config,
-        train_config=train_config,
-        operator=operator,
+        operator=linear_operator,
         y=y,
     )
 
