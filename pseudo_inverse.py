@@ -16,7 +16,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 class LinearOperator:
-    def __init__(self, image_shape, measurement_dim, mask_ratio=0.5, seed=0, device="cpu"):
+    def __init__(self, image_shape, measurement_dim, device="cpu"):
         self.image_shape = image_shape
         self.n = int(np.prod(image_shape))
         self.m = measurement_dim
@@ -24,16 +24,10 @@ class LinearOperator:
         _, C, H, W = image_shape   
         n = C * H * W
 
-        hcrop, wcrop = H // 2, W // 2
+        hcrop, wcrop = H // 4, W // 2
         corner_top, corner_left = H // 4, int(0.45 * W)
         mask = torch.ones(image_shape, device=device)
         mask[:, :, corner_top:corner_top + hcrop, corner_left:corner_left + wcrop] = 0
-        # g = torch.Generator(device="cpu")
-        # g.manual_seed(seed)
-
-        # mask = torch.rand(n, generator=g)
-        # mask = (mask > mask_ratio).float()
-        # mask = mask.view(1, C, H, W)
 
         self.mask = mask.to(device)
 
@@ -55,43 +49,43 @@ class LinearOperator:
         return self.H(x0)
 
 
-def predict_x0_from_eps(x_t, eps_theta, alpha_bar_t):
-    sqrt_alpha_bar_t = torch.sqrt(alpha_bar_t)
-    sqrt_one_minus_alpha_bar_t = torch.sqrt(torch.clamp(1.0 - alpha_bar_t, min=1e-12))
-    x0_hat = (x_t - sqrt_one_minus_alpha_bar_t * eps_theta) / torch.clamp(sqrt_alpha_bar_t, min=1e-12)
+def predict_x0_from_eps(x_t, eps_theta, alpha_t):
+    sqrt_alpha_t = torch.sqrt(alpha_t)
+    sqrt_one_minus_alpha_t = torch.sqrt(1.0 - alpha_t)
+    x0_hat = (x_t - sqrt_one_minus_alpha_t * eps_theta) / sqrt_alpha_t
     return x0_hat
 
 
-def compute_pseudoinverse_guidance(x_t, x0_hat, y, operator):
-    mat = operator.H_pinv(y) - operator.H_pinv(operator.H(x0_hat))
-    inner = (mat.detach() * x0_hat).sum()
+def compute_pseudoinverse_guidance(x_t, hatx_t, y, operator, sigma_y, r_t):
+    residual = y - operator.H(hatx_t)
+    A = operator.mask + (sigma_y**2 / (r_t**2)) * torch.ones_like(operator.mask)
+    vec = residual / A
+    vec = operator.H(vec)
+    inner = (vec.detach() * hatx_t).sum()
     guidance = torch.autograd.grad(inner, x_t)[0]
     return guidance
 
 
 @torch.no_grad()
-def ddim_step_from_x0_eps(x0_hat, eps_theta, alpha_bar_t, alpha_bar_s, eta):
+def ddim_step_from_x0_eps(x0_hat, eps_theta, alpha_t, alpha_s, eta):
     if eta > 0.0:
         sigma_ts = eta * torch.sqrt(
-            torch.clamp(
-                ((1.0 - alpha_bar_s) / torch.clamp(1.0 - alpha_bar_t, min=1e-12)) *
-                (1.0 - alpha_bar_t / torch.clamp(alpha_bar_s, min=1e-12)),
-                min=0.0
-            )
+                ((1.0 - alpha_s) / (1.0 - alpha_t)) *
+                (1.0 - (alpha_t / alpha_s))
         )
         z = torch.randn_like(x0_hat)
     else:
-        sigma_ts = torch.zeros_like(alpha_bar_t)
+        sigma_ts = torch.zeros_like(alpha_t)
         z = torch.zeros_like(x0_hat)
 
-    c2 = torch.sqrt(torch.clamp(1.0 - alpha_bar_s - sigma_ts**2, min=0.0))
-    x_s = torch.sqrt(alpha_bar_s) * x0_hat + c2 * eps_theta + sigma_ts * z
+    c2 = torch.sqrt(1.0 - alpha_s - sigma_ts**2)
+    x_s = torch.sqrt(alpha_s) * x0_hat + c2 * eps_theta + sigma_ts * z
     return x_s
 
 
 def pseudoinverse_guided_sample(
     model,
-    scheduler,
+    scheduler : NoiseScheduler,
     model_config,
     diffusion_config,
     operator,
@@ -100,21 +94,21 @@ def pseudoinverse_guided_sample(
     model.eval()
 
     batch_size = y.shape[0]
-    im_channels = model_config["im_channels"]
-    im_size = model_config["im_size"]
 
     num_train_steps = diffusion_config["num_timesteps"]
-    num_inference_steps = diffusion_config.get("num_inference_steps", 50)
-    
+    num_inference_steps = diffusion_config.get("num_inference_steps", 100)
+
     eta = diffusion_config.get("eta", 0.0)
 
     timesteps = np.linspace(0, num_train_steps - 1, num_inference_steps, dtype=int)[::-1]
 
     x = torch.randn_like(y, device=y.device)
 
-    alpha_bar = scheduler.alpha_bar.to(device)
+    sigma = torch.sqrt(1 - scheduler.alpha_bar).to(y.device)
+    alpha = 1 / (1 + sigma.pow(2)).to(y.device)
 
     for i, t in enumerate(tqdm(timesteps, desc="PiGDM sampling")):
+
         s = timesteps[i + 1] if i + 1 < len(timesteps) else 0
 
         t_batch = torch.full((batch_size,), int(t), device=device, dtype=torch.long)
@@ -124,21 +118,22 @@ def pseudoinverse_guided_sample(
 
         eps_theta = model(x, t_batch)[:, :3, :, :]
 
-        alpha_bar_t = alpha_bar[t].view(1, 1, 1, 1)
-        alpha_bar_s = alpha_bar[s].view(1, 1, 1, 1)
+        alpha_t = alpha[t].view(1, 1, 1, 1)
+        alpha_s = alpha[s].view(1, 1, 1, 1)
+        sigma_t = torch.sqrt((1.0 - alpha_t) / alpha_t)
+        r_t = torch.sqrt((sigma_t.pow(2)) / (sigma_t.pow(2) + 1.0))
+        hatx_t = predict_x0_from_eps(x, eps_theta, alpha_t)
 
-        x0_hat = predict_x0_from_eps(x, eps_theta, alpha_bar_t)
-        x0_hat = torch.clamp(x0_hat, -1.0, 1.0)
+        guidance = compute_pseudoinverse_guidance(x, hatx_t, y, operator, sigma_y = 0.02, r_t = r_t)
 
-        guidance = compute_pseudoinverse_guidance(x, x0_hat, y, operator)
-        guidance = torch.nan_to_num(guidance, nan=0.0, posinf=0.0, neginf=0.0)
+        x_ddim = ddim_step_from_x0_eps(hatx_t, eps_theta, alpha_t, alpha_s, eta)
 
-        x_ddim = ddim_step_from_x0_eps(x0_hat, eps_theta, alpha_bar_t, alpha_bar_s, eta)
+        x = x_ddim + torch.sqrt(alpha_t) * guidance
 
-        x = x_ddim + torch.sqrt(alpha_bar_t) * guidance
-
-        x = torch.nan_to_num(x, nan=0.0, posinf=1.0, neginf=-1.0)
         x = x.detach()
+
+        if i % 100 == 0:
+            save_grid(x, path = f"./samples/pigdm_output_{i}.png")
 
     return x
 
@@ -197,26 +192,17 @@ def run(args):
     x0 = im2tensor(plt.imread('ffhq256-1k-validation/' + str(idx).zfill(5) + '.png')).to(device)
     imgshape = x0.shape
 
-    h = imgshape[2]
-    w = imgshape[3]
-    hcrop, wcrop = h // 2, w // 2
-    corner_top, corner_left = h // 4, int(0.45 * w)
-    mask = torch.ones(imgshape, device=device)
-    mask[:, :, corner_top:corner_top + hcrop, corner_left:corner_left + wcrop] = 0
-
     operator = LinearOperator(
         image_shape=imgshape,
         measurement_dim=0.0,
-        mask_ratio=0.5,
-        seed = 0,
         device = device
     )
 
-    sigma_noise = 2 * 10 / 255
+    sigma_noise = 0.02
     noise = torch.normal(0.0, std = sigma_noise, size = x0.size(), device=device)
     y = operator.H(x0.clone()) + noise
 
-    x_init = torch.randn_like(y, device=device, requires_grad=True)
+    x_init = torch.randn_like(y, requires_grad=True)
 
     save_grid(x_init, args.pinv_init_path, nrow=train_config["num_grid_rows"])
 

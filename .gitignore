@@ -226,3 +226,4 @@ diffusion-posterior-sampling/
 ffhq256-1k-validation.zip
 ffhq256-1k-validation/
 guided_diffusion/
+samples/
