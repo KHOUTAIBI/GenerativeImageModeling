@@ -1,4 +1,5 @@
 import torch
+import torch.nn.functional as F
 import numpy as np
 
 class LinearOperator:
@@ -122,3 +123,75 @@ class LinearOperator:
 
         dist2 = (xx - proj_x) ** 2 + (yy - proj_y) ** 2
         mask[dist2 <= radius ** 2] = 0.0
+
+# Superresolution
+class SuperResolutionOperator:
+    def __init__(
+        self,
+        image_shape,
+        measurement_dim=None,
+        scale_factor=4,
+        device="cpu",
+        mode_down="bicubic",
+        mode_up="bicubic",
+    ):
+        self.image_shape = image_shape
+        self.n = int(np.prod(image_shape))
+        self.m = measurement_dim
+        self.device = device
+        self.scale_factor = scale_factor
+        self.mode_down = mode_down
+        self.mode_up = mode_up
+
+        _, C, H, W = image_shape
+        assert H % scale_factor == 0 and W % scale_factor == 0
+
+        self.C = C
+        self.H = H
+        self.W = W
+        self.h = H // scale_factor
+        self.w = W // scale_factor
+
+    def flatten(self, x):
+        return x.view(x.shape[0], -1)
+
+    def unflatten(self, x):
+        return x.view(x.shape[0], *self.image_shape)
+
+    def H(self, x):
+        if self.mode_down in ["bilinear", "bicubic"]:
+            return F.interpolate(
+                x,
+                size=(self.h, self.w),
+                mode=self.mode_down,
+                align_corners=False,
+                antialias=True,
+            )
+        else:
+            return F.interpolate(
+                x,
+                size=(self.h, self.w),
+                mode=self.mode_down,
+            )
+
+    def H_pinv(self, y):
+        if self.mode_up in ["bilinear", "bicubic"]:
+            return F.interpolate(
+                y,
+                size=(self.H, self.W),
+                mode=self.mode_up,
+                align_corners=False,
+            )
+        else:
+            return F.interpolate(
+                y,
+                size=(self.H, self.W),
+                mode=self.mode_up,
+            )
+
+    @torch.no_grad()
+    def observe(self, x0, sigma_y=0.0):
+        y = self.H(x0)
+        if sigma_y > 0:
+            y = y + sigma_y * torch.randn_like(y)
+        return y

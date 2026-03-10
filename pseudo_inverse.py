@@ -12,7 +12,7 @@ from operators import *
 from noise_scheduler import NoiseScheduler
 from torchvision.utils import make_grid
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = "cuda" if torch.cuda.is_available() else "cpu"
 
 
 def predict_x0_from_eps(x_t, eps_theta, alpha_t):
@@ -62,6 +62,7 @@ def pseudoinverse_guided_sample_ddim(
     model.eval()
 
     batch_size = y.shape[0]
+
     num_train_steps = diffusion_config["num_timesteps"]
     num_inference_steps = diffusion_config.get("num_inference_steps", 100)
     eta = diffusion_config.get("eta", 0.0)
@@ -298,7 +299,7 @@ def run(args):
     )
 
     sigma_noise = diffusion_config.get("sigma_y", 0.01)
-    y = operator.H(x0.clone()) + sigma_noise * torch.randn_like(x0)
+    y = operator.observe(x0, sigma_y=sigma_noise)
 
     save_grid(y, path="./samples/y_init.png")
     save_grid(operator.H(x0), path="./samples/y_clean.png")
