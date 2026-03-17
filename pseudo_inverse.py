@@ -15,7 +15,7 @@ from torchvision.utils import make_grid
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 
-def predict_x0_from_eps(x_t, eps_theta, alpha_t):
+def x0_from_eps(x_t, eps_theta, alpha_t):
     sqrt_alpha_t = torch.sqrt(torch.clamp(alpha_t, min=1e-12))
     sqrt_one_minus_alpha_t = torch.sqrt(torch.clamp(1.0 - alpha_t, min=0.0))
     x0_hat = (x_t - sqrt_one_minus_alpha_t * eps_theta) / sqrt_alpha_t
@@ -87,7 +87,7 @@ def pseudoinverse_guided_sample_ddim(
         alpha_t = alpha[t].view(1, 1, 1, 1)
         alpha_s = alpha[s].view(1, 1, 1, 1)
 
-        hatx_t = predict_x0_from_eps(x, eps_theta, alpha_t)
+        hatx_t = x0_from_eps(x, eps_theta, alpha_t)
         hatx_t = torch.clamp(hatx_t, -1.0, 1.0)
 
         r_t = torch.sqrt(torch.clamp(1.0 - alpha_t, min=1e-12))
@@ -270,6 +270,7 @@ def run(args):
         "num_head_channels": 64,
         "num_heads_upsample": -1,
         "use_scale_shift_norm": True,
+        "use_checkpoint": True,
         "dropout": 0.0,
         "resblock_updown": True,
         "use_fp16": False,
@@ -303,6 +304,7 @@ def run(args):
 
     save_grid(y, path="./samples/y_init.png")
     save_grid(operator.H(x0), path="./samples/y_clean.png")
+    save_grid(x0, path="./samples/x0.png")
 
     x_init = torch.randn_like(y)
     save_grid(x_init, args.pinv_init_path, nrow=train_config["num_grid_rows"])
