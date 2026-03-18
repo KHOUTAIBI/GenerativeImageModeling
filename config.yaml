@@ -2,16 +2,25 @@ diffusion_config:
   num_timesteps: 1000
   beta_init: 0.0001
   beta_end: 0.02
-  num_inference_steps: 100
+  num_inference_steps: 500
   eta: 0.0
-  sigma_y: 0.02
-  guidance_scale: 0.1
+  sigma_y: 0.01
+  guidance_scale: 2.0
   sampler: ddim
+  save : false
+  mode : super_res
+  explainability:
+    enabled: true
+    save_every: 20
+    outdir: "./samples/explain"
 
 model_config:
   im_channels: 3
   im_size: 256
 
+
+
 train_config:
-  image_index: 500
+  image_index: 800
   num_grid_rows: 1
+

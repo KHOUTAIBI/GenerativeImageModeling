@@ -14,6 +14,7 @@ class LinearOperator:
                 max_length=40,
                 device="cuda"):
         
+        self.type = "linear"  
         self.image_shape = image_shape
         self.n = int(np.prod(image_shape))
         self.m = measurement_dim
@@ -135,6 +136,8 @@ class SuperResolutionOperator:
         mode_down="bicubic",
         mode_up="bicubic",
     ):
+        
+        self.mode = "nonlinear"
         self.image_shape = image_shape
         self.n = int(np.prod(image_shape))
         self.m = measurement_dim
@@ -147,7 +150,7 @@ class SuperResolutionOperator:
         assert H % scale_factor == 0 and W % scale_factor == 0
 
         self.C = C
-        self.H = H
+        self._H = H
         self.W = W
         self.h = H // scale_factor
         self.w = W // scale_factor
@@ -178,14 +181,14 @@ class SuperResolutionOperator:
         if self.mode_up in ["bilinear", "bicubic"]:
             return F.interpolate(
                 y,
-                size=(self.H, self.W),
+                size=(self._H, self.W),
                 mode=self.mode_up,
                 align_corners=False,
             )
         else:
             return F.interpolate(
                 y,
-                size=(self.H, self.W),
+                size=(self._H, self.W),
                 mode=self.mode_up,
             )
 
@@ -195,3 +198,13 @@ class SuperResolutionOperator:
         if sigma_y > 0:
             y = y + sigma_y * torch.randn_like(y)
         return y
+    
+def chain_of_operators(operators, x):
+    for operator in operators:
+        x = operator.H(x)
+    return x
+
+def chain_of_pseudooperators(operators : list, x):
+    for operator in operators:
+        x = operator.H_pinv(x)
+    return x
