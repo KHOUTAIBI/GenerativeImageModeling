@@ -3,7 +3,6 @@ from utils import *
 from operators import *
 from guidance import *
 from noise_scheduler import NoiseScheduler
-from torchvision.utils import make_grid
 
 def run(args):
     with open(args.config_path, "r") as f:

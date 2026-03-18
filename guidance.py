@@ -192,7 +192,7 @@ def pseudoinverse_guided_sample_ddim(
         psnr_list.append(psnr_x)
 
         if i % 25 == 0 and save:
-            save_grid(x, path=f"./samples/pigdm_ddim_output_{i}.png")
+            save_grid(hatx_t, path=f"./samples/pigdm_ddim_output_{i}.png")
 
     if explain_enabled:
         plot_scalar_logs(logs, explain_outdir)

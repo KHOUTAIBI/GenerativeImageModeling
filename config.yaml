@@ -2,12 +2,12 @@ diffusion_config:
   num_timesteps: 1000
   beta_init: 0.0001
   beta_end: 0.02
-  num_inference_steps: 500
+  num_inference_steps: 100
   eta: 0.0
   sigma_y: 0.01
-  guidance_scale: 2.0
+  guidance_scale: 0.1
   sampler: ddim
-  save : false
+  save : true
   mode : super_res
   explainability:
     enabled: true
