@@ -360,6 +360,98 @@ class JPEG2000Operator:
     @torch.no_grad()
     def observe(self, x0, sigma_y=0.0):
         return self.H(x0)
+    
+
+# ----------------------
+# Motion Blur operator as seen in the inverse problem TP
+# ----------------------
+class MotionBlurOperator:
+    def __init__(self, kernel, image_shape, device="cpu"):
+        """
+        kernel:      torch.Tensor of shape (m, n), e.g. (25,25) AS in the tp
+        image_shape: (B, C, H, W)
+        """
+        self.type = "linear"
+        self.image_shape = image_shape
+        self.n = int(np.prod(image_shape))
+        self.m = self.n
+        self.device = device
+
+        B, C, H, W = image_shape
+        self.B = B
+        self.C = C
+        self.Himg = H
+        self.Wimg = W
+
+        kernel = kernel.to(device=device, dtype=torch.float32)
+        kernel = kernel / kernel.sum()
+
+        self.kernel_small = kernel
+        self.kernel_full = self._embed_kernel(kernel, H, W)
+        self.fk = torch.fft.fft2(self.kernel_full)          
+        self.fk_conj = torch.conj(self.fk)
+
+    def _embed_kernel(self, kernel, H, W):
+        """
+        Put the small PSF in the top-left corner of an HxW array,
+        then roll so that its center is at (0,0).
+        """
+        m, n = kernel.shape
+        k = torch.zeros((H, W), device=kernel.device, dtype=kernel.dtype)
+        k[:m, :n] = kernel
+        k = torch.roll(k, shifts=(-m // 2, -n // 2), dims=(0, 1))
+        return k
+
+    def flatten(self, x):
+        return x.view(x.shape[0], -1)
+
+    def unflatten(self, x):
+        return x.view(x.shape[0], *self.image_shape[1:])
+
+    def H(self, x):
+        """
+        Circular convolution by FFT.
+        x: (B,C,H,W)
+        """
+        Xf = torch.fft.fft2(x, dim=(-2, -1))
+        Yf = Xf * self.fk[None, None, :, :]
+        y = torch.fft.ifft2(Yf, dim=(-2, -1)).real
+        return y
+
+    def Ht(self, x):
+        """
+        Adjoint operator.
+        """
+        Xf = torch.fft.fft2(x, dim=(-2, -1))
+        Yf = Xf * self.fk_conj[None, None, :, :]
+        y = torch.fft.ifft2(Yf, dim=(-2, -1)).real
+        return y
+
+    def H_pinv(self, y, eps=1e-3):
+        """
+        Stabilized inverse filter.
+        """
+        Yf = torch.fft.fft2(y, dim=(-2, -1))
+        Xf = Yf / (self.fk[None, None, :, :] + eps)
+        x = torch.fft.ifft2(Xf, dim=(-2, -1)).real
+        return x
+
+    def wiener(self, y, lam=1e-2):
+        """
+        More stable than plain inverse filtering.
+        """
+        Yf = torch.fft.fft2(y, dim=(-2, -1))
+        denom = (self.fk.abs() ** 2 + lam)[None, None, :, :]
+        Xf = self.fk_conj[None, None, :, :] * Yf / denom
+        x = torch.fft.ifft2(Xf, dim=(-2, -1)).real
+        return x
+
+    @torch.no_grad()
+    def observe(self, x0, sigma_y=0.0):
+        y = self.H(x0)
+        if sigma_y > 0:
+            y = y + sigma_y * torch.randn_like(y)
+        return y
 
 # -----------------
 # Operator Chain

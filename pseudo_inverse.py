@@ -49,6 +49,8 @@ def run(args):
     x0 = im2tensor(plt.imread("ffhq256-1k-validation/" + str(idx).zfill(5) + ".png")).to(device)
     imgshape = x0.shape
 
+    kernel = torch.tensor(np.loadtxt('kernels/kernel8.txt')).to(device)
+
     operator_mask = MaskOperator(
         image_shape=imgshape,
         measurement_dim=20,
@@ -67,8 +69,14 @@ def run(args):
         device=device
         )
     
+    operator_motion_blur = MotionBlurOperator(
+        kernel=kernel,
+        image_shape=imgshape,
+        device = device
+    )
+    
 
-    list_operators = list([operator_jpeg, operator_mask, operator_super_res])
+    list_operators = list([operator_jpeg, operator_mask, operator_motion_blur])
     operator = OperatorChain(list_operators)
 
     sigma_noise = diffusion_config.get("sigma_y", 0.01)
