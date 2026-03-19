@@ -49,12 +49,27 @@ def run(args):
     x0 = im2tensor(plt.imread("ffhq256-1k-validation/" + str(idx).zfill(5) + ".png")).to(device)
     imgshape = x0.shape
 
-    operator = LinearOperator(
+    operator_mask = MaskOperator(
         image_shape=imgshape,
-        mask_type="freeform",
-        measurement_dim=0.0,
+        measurement_dim=20,
+        mask_type="rectangle",
         device=device
     )
+
+    operator_super_res = SuperResolutionOperator(
+        image_shape=imgshape,
+        device = device,
+    )
+
+    operator_jpeg = JPEG2000Operator(
+        image_shape=imgshape,
+        quant_step=1.0,
+        device=device
+        )
+    
+
+    list_operators = list([operator_jpeg, operator_mask, operator_super_res])
+    operator = OperatorChain(list_operators)
 
     sigma_noise = diffusion_config.get("sigma_y", 0.01)
     y = operator.observe(x0, sigma_y=sigma_noise)
@@ -76,8 +91,9 @@ def run(args):
             x0 = x0,
             y=y,
         )
+
     elif sampler == "ddim":
-        x_rec, psnr_list, logs = pseudoinverse_guided_sample_ddim(
+        x_rec, psnr_list = pseudoinverse_guided_sample_ddim(
             model=model,
             scheduler=scheduler,
             diffusion_config=diffusion_config,

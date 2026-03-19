@@ -8,15 +8,6 @@ from noise_scheduler import NoiseScheduler
 from utils import (psnr, 
                    save_grid)
 
-from explainability import (
-    save_heatmap,
-    tensor_norm,
-    cosine_similarity_map,
-    compute_input_saliency,
-    plot_scalar_logs,
-    compute_hatx_saliency
-)
-
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 def predict_x0_from_eps(x_t, eps_theta, alpha_t) -> torch.Tensor:
@@ -33,8 +24,9 @@ def compute_pseudoinverse_guidance(x_t, hatx_t, y, operator , sigma_y, r_t, mode
         Computing the guidance term in the case of linear and non linear operations
         WARNING:
             We can not compute the non linear operator in the case of noiys sigma_y !
+            The next part would be to do so
     """
-    if sigma_y == 0.0 :
+    if (sigma_y == 0.0) or (operator.type == "nonlinear"):
 
         v = operator.H_pinv(y) - operator.H_pinv(operator.H(hatx_t))
         inner = (v.detach() * hatx_t).sum()
@@ -43,15 +35,7 @@ def compute_pseudoinverse_guidance(x_t, hatx_t, y, operator , sigma_y, r_t, mode
     
     else:
 
-        assert operator.type == "linear", "Can not pseudo guide with a non linear operator in the case of noisy y"
-        
-        residual = y - operator.H(hatx_t)
-        lam = (sigma_y / r_t).pow(2)
-        v = residual / (operator.mask + lam)
-        u = operator.H(v)
-        inner = (u.detach() * hatx_t).sum()
-        guidance = torch.autograd.grad(inner, x_t)[0]
-        return guidance
+        return operator.guidance(x_t, hatx_t, y, operator , sigma_y, r_t)
     
 @torch.no_grad()
 def ddim_step_from_x0_eps(x0_hat, eps_theta, alpha_t, alpha_s, eta) -> torch.Tensor:
@@ -103,26 +87,11 @@ def pseudoinverse_guided_sample_ddim(
     sigma_y = diffusion_config.get("sigma_y", 0.01)
     guidance_scale = diffusion_config.get("guidance_scale", 1.0)
 
-    explain_cfg = diffusion_config.get("explainability", {})
-    explain_enabled = explain_cfg.get("enabled", False)
-    save_every = explain_cfg.get("save_every", 20)
-    explain_outdir = explain_cfg.get("outdir", "./samples/explain_ddim")
-
     timesteps = np.linspace(0, num_train_steps - 1, num_inference_steps, dtype=int)[::-1]
     x = torch.randn_like(x0, device=y.device)
 
     psnr_list = []
     alpha = scheduler.alpha_bar.to(y.device)
-
-    logs = {
-        "psnr": [],
-        "guidance_norm": [],
-        "eps_norm": [],
-        "residual_norm": [],
-        "xhat_norm": [],
-        "cos_guidance_eps": [],
-        "pinv_residual_norm": [],
-    }
 
     for i, t in enumerate(tqdm(timesteps, desc="PiGDM-DDIM sampling")):
         s = timesteps[i + 1] if i + 1 < len(timesteps) else 0
@@ -149,6 +118,7 @@ def pseudoinverse_guided_sample_ddim(
             r_t=r_t,
             mode=mode,
         )
+
         guidance = torch.nan_to_num(guidance, nan=0.0, posinf=0.0, neginf=0.0)
 
         x_ddim = ddim_step_from_x0_eps(hatx_t, eps_theta, alpha_t, alpha_s, eta)
@@ -157,47 +127,13 @@ def pseudoinverse_guided_sample_ddim(
         residual = operator.H(hatx_t) - y
         psnr_x = psnr(x0, x_next)
 
-        logs["psnr"].append(psnr_x)
-        logs["guidance_norm"].append(tensor_norm(guidance))
-        logs["eps_norm"].append(tensor_norm(eps_theta))
-        logs["residual_norm"].append(tensor_norm(residual))
-        logs["xhat_norm"].append(tensor_norm(hatx_t))
-        logs["cos_guidance_eps"].append(cosine_similarity_map(guidance, -eps_theta))
-
-        if sigma_y == 0.0:
-            pinv_residual = operator.H_pinv(y) - operator.H_pinv(operator.H(hatx_t))
-            logs["pinv_residual_norm"].append(tensor_norm(pinv_residual))
-        else:
-            logs["pinv_residual_norm"].append(float("nan"))
-
-        if explain_enabled and (i % save_every == 0):
-            os.makedirs(explain_outdir, exist_ok=True)
-            
-            save_heatmap(hatx_t, f"{explain_outdir}/hatx_step_{i:04d}.png", title=f"hatx_t step {i}")
-            save_heatmap(guidance, f"{explain_outdir}/guidance_step_{i:04d}.png", title=f"guidance step {i}")
-            save_heatmap(residual if residual.shape[-2:] == y.shape[-2:] else residual,
-                         f"{explain_outdir}/residual_step_{i:04d}.png",
-                         title=f"measurement residual step {i}")
-
-        
-            saliency = compute_hatx_saliency(model, x.detach(), t_batch, alpha_t)
-            save_heatmap(saliency, f"{explain_outdir}/saliency_hatx_step_{i:04d}.png",
-                         title=f"|d ||hatx_t||^2 / dx_t| step {i}")
-
-            if sigma_y == 0.0:
-                save_heatmap(pinv_residual, f"{explain_outdir}/pinv_residual_step_{i:04d}.png",
-                             title=f"H^dag(y)-H^dag(H(hatx_t)) step {i}")
-
         x = torch.nan_to_num(x_next, nan=0.0, posinf=1.0, neginf=-1.0).detach()
         psnr_list.append(psnr_x)
 
         if i % 25 == 0 and save:
             save_grid(hatx_t, path=f"./samples/pigdm_ddim_output_{i}.png")
 
-    if explain_enabled:
-        plot_scalar_logs(logs, explain_outdir)
-
-    return x, psnr_list, logs
+    return x, psnr_list
 
 
 def pseudoinverse_guided_sample_ddpm(

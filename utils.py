@@ -22,6 +22,9 @@ def im2tensor(x):
 
 def rgb2gray(u):
     return 0.2989 * u[:,:,0] + 0.5870 * u[:,:,1] + 0.1140 * u[:,:,2]
+
+def renorm(x):
+    return (x - x.min()) / (x.max() - x.min())
  
 def psnr(uref, ut, M=2):
     rmse = np.sqrt(np.mean((np.array(uref.cpu())-np.array(ut.cpu()))**2))

@@ -1,8 +1,15 @@
 import torch
 import torch.nn.functional as F
 import numpy as np
+from PIL import Image
+import io
+import pywt
 
-class LinearOperator:
+# -----------------------
+# Masking 
+# -----------------------
+
+class MaskOperator:
     def __init__(self, 
                 image_shape, 
                 measurement_dim, 
@@ -28,10 +35,10 @@ class LinearOperator:
 
             mask = torch.ones(image_shape, device=device)
             mask[:, :, corner_top:corner_top + hcrop, corner_left:corner_left + wcrop] = 0
-            self.mask = mask.to(device)
+            mask = mask.to(device)
 
         elif mask_type == "freeform":
-            self.mask = self._generate_freeform_mask(
+            mask = self._generate_freeform_mask(
                 image_shape=image_shape,
                 num_strokes=num_strokes,
                 max_vertices=max_vertices,
@@ -43,6 +50,8 @@ class LinearOperator:
 
         else:
             raise ValueError(f"Unknown mask_type: {mask_type}")
+    
+        self._H = mask
 
     def flatten(self, x):
         return x.view(x.shape[0], -1)
@@ -51,16 +60,28 @@ class LinearOperator:
         return x.view(x.shape[0], *self.image_shape)
 
     def H(self, x):
-        return x * self.mask
+        return x * self._H
 
     def H_pinv(self, y):
-        return y * self.mask
+        return y * self._H
+    
+    def guidance(self, x_t, hatx_t, y, operator , sigma_y, r_t):
+        """
+        Guidance, moved here to make the code cleaner !
+        """
+        residual = y - operator.H(hatx_t)
+        lam = (sigma_y / r_t).pow(2)
+        v = residual / (operator._H + lam)
+        u = operator.H(v)   
+        inner = (u.detach() * hatx_t).sum()
+        guidance = torch.autograd.grad(inner, x_t, retain_graph=True)[0]
+        return guidance
 
     @torch.no_grad()
     def observe(self, x0, sigma_y=0.0):
         y = self.H(x0)
         if sigma_y > 0:
-            y = y + sigma_y * self.mask * torch.randn_like(x0)
+            y = y + sigma_y * self._H * torch.randn_like(x0)
         return y
     
     def _generate_freeform_mask(
@@ -125,7 +146,10 @@ class LinearOperator:
         dist2 = (xx - proj_x) ** 2 + (yy - proj_y) ** 2
         mask[dist2 <= radius ** 2] = 0.0
 
+
+# ---------------------------
 # Superresolution
+# ---------------------------
 class SuperResolutionOperator:
     def __init__(
         self,
@@ -137,7 +161,7 @@ class SuperResolutionOperator:
         mode_up="bicubic",
     ):
         
-        self.mode = "nonlinear"
+        self.type = "nonlinear"
         self.image_shape = image_shape
         self.n = int(np.prod(image_shape))
         self.m = measurement_dim
@@ -199,12 +223,192 @@ class SuperResolutionOperator:
             y = y + sigma_y * torch.randn_like(y)
         return y
     
-def chain_of_operators(operators, x):
-    for operator in operators:
-        x = operator.H(x)
-    return x
+# ---------------------------
+# JPEG Compression
+# ---------------------------
+class JPEGCompressionOperator:
+    def __init__(self, image_shape, quality=20, device="cpu"):
+        self.type = "nonlinear"
+        self.image_shape = image_shape
+        self.n = int(np.prod(image_shape))
+        self.m = self.n
+        self.device = device
+        self.quality = quality
 
-def chain_of_pseudooperators(operators : list, x):
-    for operator in operators:
-        x = operator.H_pinv(x)
-    return x
+    def flatten(self, x):
+        return x.view(x.shape[0], -1)
+
+    def unflatten(self, x):
+        return x.view(x.shape[0], *self.image_shape[1:])
+
+    def _jpeg_single(self, x):
+        """
+        x: (C,H,W), float in [0,1]
+        returns: (C,H,W), float in [0,1]
+        """
+
+        x = x.detach().cpu()
+        x = ((x + 1.0) / 2.0).clamp(0, 1)
+        x_np = (x.permute(1, 2, 0).numpy() * 255.0).round().astype(np.uint8)
+
+        if x_np.shape[2] == 1:
+            pil_img = Image.fromarray(x_np[..., 0], mode="L")
+        else:
+            pil_img = Image.fromarray(x_np, mode="RGB")
+
+        buffer = io.BytesIO()
+        pil_img.save(buffer, format="JPEG", quality=self.quality)
+        buffer.seek(0)
+
+        rec = Image.open(buffer)
+        rec_np = np.array(rec)
+
+        if rec_np.ndim == 2:
+            rec_np = rec_np[..., None]
+
+        rec_t = torch.from_numpy(rec_np).float() / 255.0
+        rec_t = rec_t.permute(2, 0, 1)
+        rec_t = 2.0 * rec_t - 1.0
+        return rec_t
+
+    def H(self, x):
+        outs = [self._jpeg_single(xi) for xi in x]
+        return torch.stack(outs, dim=0).to(x.device)
+
+    def H_pinv(self, y):
+        return y
+
+    @torch.no_grad()
+    def observe(self, x0, sigma_y=0.0):
+        return self.H(x0)
+
+# -------------------------
+# JPEG2000 Wavelet compression
+# -------------------------
+class JPEG2000Operator:
+    def __init__(
+        self,
+        image_shape,
+        wavelet="haar",
+        level=3,
+        quant_step=0.02,
+        device="cpu",
+    ):
+        self.type = "nonlinear"
+        self.image_shape = image_shape
+        self.n = int(np.prod(image_shape))
+        self.m = self.n
+        self.device = device
+
+        self.wavelet = wavelet
+        self.level = level
+        self.quant_step = quant_step
+
+    def flatten(self, x):
+        return x.view(x.shape[0], -1)
+
+    def unflatten(self, x):
+        return x.view(x.shape[0], *self.image_shape[1:])
+
+    def _quantize(self, arr, step):
+        return np.round(arr / step) * step
+
+    def _jp2_single_channel(self, x2d):
+        """
+        x2d: (H,W) numpy array in [0,1]
+        """
+        coeffs = pywt.wavedec2(x2d, wavelet=self.wavelet, level=self.level)
+
+        coeffs_q = [self._quantize(coeffs[0], self.quant_step)]
+
+        for detail_level in coeffs[1:]:
+            cH, cV, cD = detail_level
+            coeffs_q.append((
+                self._quantize(cH, self.quant_step),
+                self._quantize(cV, self.quant_step),
+                self._quantize(cD, self.quant_step),
+            ))
+
+        rec = pywt.waverec2(coeffs_q, wavelet=self.wavelet)
+        rec = rec[:x2d.shape[0], :x2d.shape[1]]
+        rec = np.clip(rec, 0.0, 1.0)
+        return rec
+
+    def _jp2_single(self, x):
+        """
+        x: (C,H,W), torch tensor in [0,1]
+        """
+        x = x.detach().cpu()
+        x = ((x + 1.0) / 2.0).clamp(0, 1).numpy()
+
+        C, H, W = x.shape
+
+        rec = np.zeros_like(x, dtype=np.float32)
+        for c in range(C):
+            rec[c] = self._jp2_single_channel(x[c])
+
+        rec = 2.0 * rec - 1.0
+        return torch.from_numpy(rec)
+
+    def H(self, x):
+        outs = [self._jp2_single(xi) for xi in x]
+        return torch.stack(outs, dim=0).to(x.device)
+
+    def H_pinv(self, y):
+        return y
+
+    @torch.no_grad()
+    def observe(self, x0, sigma_y=0.0):
+        return self.H(x0)
+
+# -----------------
+# Operator Chain
+# -----------------  
+class OperatorChain:
+    def __init__(self, operators: list):
+        """
+        operators: list of operator instances (Mask, JPEG, SR, etc.)
+        """
+        self.operators = operators
+        self.type = "mixed"  # can contain linear + nonlinear
+
+    def __len__(self):
+        return len(self.operators)
+
+    def __getitem__(self, idx):
+        return self.operators[idx]
+
+    def H(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Forward chain: H_n ∘ ... ∘ H_2 ∘ H_1
+        """
+        for op in self.operators:
+            x = op.H(x)
+        return x
+
+    def H_pinv(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Pseudo-inverse chain: H_1^dag ∘ ... ∘ H_n^dag
+        (reverse order)
+        """
+        for op in reversed(self.operators):
+            x = op.H_pinv(x)
+        return x
+
+    @torch.no_grad()
+    def observe(self, x0: torch.Tensor, sigma_y: float = 0.0) -> torch.Tensor:
+        """
+        Apply full forward chain (like measurement)
+        """
+        y = self.H(x0)
+        if sigma_y > 0:
+            y = y + sigma_y * torch.randn_like(y)
+        return y
+
+    def append(self, operator):
+        self.operators.append(operator)
+
+    def summary(self):
+        print("OperatorChain:")
+        for i, op in enumerate(self.operators):
+            print(f"  [{i}] {op.__class__.__name__} (type={op.type})")
