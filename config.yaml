@@ -4,17 +4,15 @@ diffusion_config:
   beta_end: 0.02
   num_inference_steps: 100
   eta: 0.0
-  sigma_y: 0.0
+  sigma_y: 0.1
   guidance_scale: 0.1
-  sampler: ddim
+  sampler: ddpm
   save : true
   mode : super_res
 
 model_config:
   im_channels: 3
   im_size: 256
-
-
 
 train_config:
   image_index: 800

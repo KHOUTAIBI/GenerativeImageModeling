@@ -472,7 +472,7 @@ class OperatorChain:
 
     def H(self, x: torch.Tensor) -> torch.Tensor:
         """
-        Forward chain: H_n ∘ ... ∘ H_2 ∘ H_1
+        Forward chain: H_n  ...  H_2  H_1
         """
         for op in self.operators:
             x = op.H(x)
@@ -480,7 +480,7 @@ class OperatorChain:
 
     def H_pinv(self, x: torch.Tensor) -> torch.Tensor:
         """
-        Pseudo-inverse chain: H_1^dag ∘ ... ∘ H_n^dag
+        Pseudo-inverse chain: H_1^dag  ...  H_n^dag
         (reverse order)
         """
         for op in reversed(self.operators):

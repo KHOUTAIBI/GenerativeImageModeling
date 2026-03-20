@@ -46,6 +46,8 @@ def run(args):
     )
 
     idx = image_index
+    indexes = np.arange(idx, idx + 10, 1)
+    times = list()
     x0 = im2tensor(plt.imread("ffhq256-1k-validation/" + str(idx).zfill(5) + ".png")).to(device)
     imgshape = x0.shape
 
@@ -76,8 +78,9 @@ def run(args):
     )
     
 
-    list_operators = list([operator_jpeg, operator_mask, operator_motion_blur])
-    operator = OperatorChain(list_operators)
+    # Operators
+    list_operators = list([operator_motion_blur])
+    operator = operator_mask
 
     sigma_noise = diffusion_config.get("sigma_y", 0.01)
     y = operator.observe(x0, sigma_y=sigma_noise)
@@ -92,33 +95,62 @@ def run(args):
     sampler = diffusion_config.get("sampler", "ddim").lower()
 
     if sampler == "ddpm":
-        x_rec, psnr_list = pseudoinverse_guided_sample_ddpm(
-            model=model,
-            diffusion_config=diffusion_config,
-            operator=operator,
-            x0 = x0,
-            y=y,
-        )
+        
+        for idx in indexes:
+            x0 = im2tensor(plt.imread("ffhq256-1k-validation/" + str(idx).zfill(5) + ".png")).to(device)
+            imgshape = x0.shape
+            y = operator.observe(x0, sigma_y=sigma_noise)
+            start = time()
+            x_rec, psnr_list = pseudoinverse_guided_sample_ddpm(
+                model=model,
+                diffusion_config=diffusion_config,
+                operator=operator,
+                x0 = x0,
+                y=y,
+            )
+            end = time()
+            ellapsed = end - start
+            times.append(ellapsed)
 
     elif sampler == "ddim":
-        x_rec, psnr_list = pseudoinverse_guided_sample_ddim(
-            model=model,
-            scheduler=scheduler,
-            diffusion_config=diffusion_config,
-            operator=operator,
-            x0 = x0,
-            y=y,
-        )
+        
+        for idx in indexes:
+
+            for idx in indexes:
+                x0 = im2tensor(plt.imread("ffhq256-1k-validation/" + str(idx).zfill(5) + ".png")).to(device)
+                imgshape = x0.shape
+                y = operator.observe(x0, sigma_y=sigma_noise)
+                start = time()
+                x_rec, psnr_list = pseudoinverse_guided_sample_ddim(
+                    model=model,
+                    scheduler=scheduler,
+                    diffusion_config=diffusion_config,
+                    operator=operator,
+                    x0 = x0,
+                    y=y,
+                )
+                end = time()
+                ellapsed = end - start
+                times.append(ellapsed)
 
     else :
-        x_rec, psnr_list = dps_sample_diffsion(
-            model=model,
-            diffusion_config=diffusion_config,
-            operator=operator,
-            x0 = x0,
-            y=y,
-        )
+        for idx in indexes:
+            x0 = im2tensor(plt.imread("ffhq256-1k-validation/" + str(idx).zfill(5) + ".png")).to(device)
+            imgshape = x0.shape
+            y = operator.observe(x0, sigma_y=sigma_noise)
+            start = time()
+            x_rec, psnr_list = dps_sample_diffsion(
+                model=model,
+                diffusion_config=diffusion_config,
+                operator=operator,
+                x0 = x0,
+                y=y,
+            )
+            end = time()
+            ellapsed = end - start
+            times.append(ellapsed)
 
+    print(f"Mean ellapsed time is: {np.mean(times):.5}s and std ellapsed time is: {np.std(times):.5}s")
     os.makedirs(os.path.dirname(args.output_path), exist_ok=True)
     save_grid(x_rec, args.output_path, nrow=train_config["num_grid_rows"])
     plt.plot(np.arange(len(psnr_list)), psnr_list)

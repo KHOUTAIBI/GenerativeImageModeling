@@ -7,6 +7,7 @@ from tqdm import tqdm
 import yaml
 import argparse
 import os
+from time import time
 
 
 device = "cuda:0" if torch.cuda.is_available() else "cpu"
