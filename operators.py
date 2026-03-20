@@ -356,7 +356,7 @@ class JPEG2000Operator:
 
     def H_pinv(self, y):
         return y
-
+   
     @torch.no_grad()
     def observe(self, x0, sigma_y=0.0):
         return self.H(x0)
@@ -445,7 +445,23 @@ class MotionBlurOperator:
         Xf = self.fk_conj[None, None, :, :] * Yf / denom
         x = torch.fft.ifft2(Xf, dim=(-2, -1)).real
         return x
+    
+     
+    def guidance(self, x_t, hatx_t, y, operator , sigma_y, r_t):
+        """
+        Guidance, moved here to make the code cleaner !
+        """
+        residual = y - operator.H(hatx_t)   
+        lam = (sigma_y / r_t).pow(2)
+        Rf = torch.fft.fft2(residual, dim=(-2, -1))
+        denom = operator.fk.abs() ** 2 + lam   
+        Uf = torch.conj(operator.fk)[None, None, :, :] * Rf / denom
+        u = torch.fft.ifft2(Uf, dim=(-2, -1)).real
 
+        inner = (u.detach() * hatx_t).sum()
+        guidance = torch.autograd.grad(inner, x_t, retain_graph=True)[0]
+        return guidance
+    
     @torch.no_grad()
     def observe(self, x0, sigma_y=0.0):
         y = self.H(x0)

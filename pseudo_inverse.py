@@ -46,7 +46,7 @@ def run(args):
     )
 
     idx = image_index
-    indexes = np.arange(idx, idx + 10, 1)
+    indexes = np.arange(idx, idx + 1, 1)
     times = list()
     x0 = im2tensor(plt.imread("ffhq256-1k-validation/" + str(idx).zfill(5) + ".png")).to(device)
     imgshape = x0.shape
@@ -80,7 +80,7 @@ def run(args):
 
     # Operators
     list_operators = list([operator_motion_blur])
-    operator = operator_mask
+    operator = operator_motion_blur
 
     sigma_noise = diffusion_config.get("sigma_y", 0.01)
     y = operator.observe(x0, sigma_y=sigma_noise)
@@ -151,6 +151,7 @@ def run(args):
             times.append(ellapsed)
 
     print(f"Mean ellapsed time is: {np.mean(times):.5}s and std ellapsed time is: {np.std(times):.5}s")
+
     os.makedirs(os.path.dirname(args.output_path), exist_ok=True)
     save_grid(x_rec, args.output_path, nrow=train_config["num_grid_rows"])
     plt.plot(np.arange(len(psnr_list)), psnr_list)

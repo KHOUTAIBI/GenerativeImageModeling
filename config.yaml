@@ -6,7 +6,7 @@ diffusion_config:
   eta: 0.0
   sigma_y: 0.1
   guidance_scale: 0.1
-  sampler: ddpm
+  sampler: ddim
   save : true
   mode : super_res
 
@@ -15,6 +15,6 @@ model_config:
   im_size: 256
 
 train_config:
-  image_index: 800
+  image_index: 100
   num_grid_rows: 1
 
