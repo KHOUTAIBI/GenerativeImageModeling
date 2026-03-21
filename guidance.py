@@ -280,6 +280,7 @@ def simple_ddpm(
         Sampling from the DDPM without guidance
     """
     model.eval()
+    os.makedirs(f"./samples/{dir}", exist_ok=True)
 
     batch_size = y.shape[0]
     save = diffusion_config['save']
@@ -325,5 +326,12 @@ def simple_ddpm(
             save_grid(torch.cat((x, xhat, x0), dim=3), path=f"./samples/{dir}/ddpm_no_guidance_output_t={t}.png")
         
     plot_scalar_logs({"psnrx": psnrx, "psnrxhat": psnrxhat}, path=f"./samples/{dir}/ddpm_no_guidance_psnr.png")
+    
+    import csv
+    csv_path = f"./samples/{dir}/ddpm_no_guidance_psnr.csv"
+    if not os.path.exists(csv_path):
+        with open(csv_path, mode='w', newline='') as file:
+            writer = csv.writer(file)
+            writer.writerow(["timestep", "psnr_x", "psnr_xhat"])
 
     return x
