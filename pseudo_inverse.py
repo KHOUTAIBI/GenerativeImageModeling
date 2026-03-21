@@ -9,7 +9,6 @@ def run(args):
         config = yaml.safe_load(f)
 
     diffusion_config = config["diffusion_config"]
-    model_config = config["model_config"]
     train_config = config["train_config"]
     image_index = train_config["image_index"]
 
@@ -94,7 +93,23 @@ def run(args):
 
     sampler = diffusion_config.get("sampler", "ddim").lower()
 
-    if sampler == "ddpm":
+    if sampler == "ddpm_no_guidance":
+        for idx in indexes:
+            x0 = im2tensor(plt.imread("ffhq256-1k-validation/" + str(idx).zfill(5) + ".png")).to(device)
+            imgshape = x0.shape
+            y = operator.observe(x0, sigma_y=sigma_noise)
+            start = time()
+            x_rec = simple_ddpm(
+                model=model,
+                diffusion_config=diffusion_config,
+                y=y,
+                x0 = x0,
+            )
+            psnr_list = [] # Attn
+            end = time()
+            ellapsed = end - start
+            times.append(ellapsed)
+    elif sampler == "ddpm":
         
         for idx in indexes:
             x0 = im2tensor(plt.imread("ffhq256-1k-validation/" + str(idx).zfill(5) + ".png")).to(device)

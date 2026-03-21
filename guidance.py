@@ -225,8 +225,7 @@ def dps_sample_diffsion(
     num_train_steps = diffusion_config["num_timesteps"]
     beta_start = diffusion_config["beta_init"]
     beta_end = diffusion_config["beta_end"]
-    sigma_y = diffusion_config.get("sigma_y", 0.01)
-    guidance_scale = diffusion_config.get("guidance_scale", 1.0)
+    guidance_scale = diffusion_config["guidance_scale"]
 
     beta = torch.linspace(beta_start, beta_end, num_train_steps, device=device)
     alpha = 1.0 - beta
@@ -246,7 +245,7 @@ def dps_sample_diffsion(
 
         eps = model(x, t_batch)[:, :3, :, :]
         xhat = (x - torch.sqrt(torch.clamp(betabar[t], min=1e-12)) * eps) / torch.sqrt(torch.clamp(alphabar[t], min=1e-12))
-        xhat = torch.clamp(xhat, -1.0, 1.0)
+        # xhat = torch.clamp(xhat, -1.0, 1.0)
 
         error = (operator.H(xhat) - y).pow(2).sum()
         grad = torch.autograd.grad(error, x)[0]
@@ -264,7 +263,58 @@ def dps_sample_diffsion(
         psnr_x = psnr(x0, x)
         psnr_list.append(psnr_x)
 
-        if i % 100 == 0 and save:
-            save_grid(x, path=f"./samples/dps_ddpm_output_{i}.png")
+        if (i % 100 == 0 or t == 0) and save:
+            save_grid(x, path=f"./samples/dps_ddpm_output_t={t}.png")
 
     return x, psnr_list
+
+
+def simple_ddpm(
+    model,
+    diffusion_config,
+    y,
+    x0,
+    dir="simple_ddpm"
+):
+    """
+        Sampling from the DDPM without guidance
+    """
+    model.eval()
+
+    save = diffusion_config['save']
+    num_train_steps = diffusion_config["num_timesteps"]
+    beta_start = diffusion_config["beta_init"]
+    beta_end = diffusion_config["beta_end"]
+
+    beta = torch.linspace(beta_start, beta_end, num_train_steps, device=device)
+    alpha = 1.0 - beta
+    alphabar = torch.cumprod(alpha, dim=0)
+    betabar = 1.0 - alphabar
+
+    reversed_time_steps = np.arange(num_train_steps)[::-1]
+    x = y.clone().to(device)
+
+    psnrx = []
+    psnrxhat = []
+    for i, t in tqdm(enumerate(reversed_time_steps), total=len(reversed_time_steps), desc="DDPM sampling"):
+        with torch.no_grad():
+            model_output = model(x, torch.tensor(t, device=device).unsqueeze(0))
+        eps = model_output[:,:3,:,:]
+        xhat = (x - torch.sqrt(betabar[t]) * eps) / torch.sqrt(alphabar[t])
+
+        z = torch.randn_like(x)
+        x = torch.sqrt(alpha[t]) * x + torch.sqrt(beta[t]) * z
+
+        psnr_x = psnr(x, x0)
+        psnrhat = psnr(xhat, x0)
+
+        psnrx.append(psnr_x)
+        psnrxhat.append(psnrhat)
+
+        if (t+1)%100==0 or t==0 and save:
+            print('Iteration :', t+1)
+            save_grid(torch.cat((x, xhat, x0), dim=3), path=f"./samples/{dir}/ddpm_no_guidance_output_t={t}.png")
+        
+    plot_scalar_logs({"psnrx": psnrx, "psnrxhat": psnrxhat}, path=f"./samples/{dir}/ddpm_no_guidance_psnr.png")
+
+    return x
