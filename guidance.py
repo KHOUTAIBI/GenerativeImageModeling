@@ -239,7 +239,7 @@ def dps_sample_diffsion(
     reversed_time_steps = np.arange(num_train_steps)[::-1]
     x = torch.randn_like(x0, device=device)
 
-    for i, t in tqdm(enumerate(reversed_time_steps), total=len(reversed_time_steps), desc="PiGDM-DDPM sampling"):
+    for i, t in tqdm(enumerate(reversed_time_steps), total=len(reversed_time_steps), desc="PiGDM-DPS sampling"):
 
         x = x.detach().requires_grad_(True)
         t_batch = torch.full((batch_size,), int(t), device=device, dtype=torch.long)
