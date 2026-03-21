@@ -281,6 +281,7 @@ def simple_ddpm(
     """
     model.eval()
 
+    batch_size = y.shape[0]
     save = diffusion_config['save']
     num_train_steps = diffusion_config["num_timesteps"]
     beta_start = diffusion_config["beta_init"]
@@ -296,14 +297,22 @@ def simple_ddpm(
 
     psnrx = []
     psnrxhat = []
-    for i, t in tqdm(enumerate(reversed_time_steps), total=len(reversed_time_steps), desc="DDPM sampling"):
-        with torch.no_grad():
-            model_output = model(x, torch.tensor(t, device=device).unsqueeze(0))
-        eps = model_output[:,:3,:,:]
-        xhat = (x - torch.sqrt(betabar[t]) * eps) / torch.sqrt(alphabar[t])
+    for i, t in tqdm(enumerate(reversed_time_steps), total=len(reversed_time_steps), desc="DDPM sampling without guidance"):
+        t_batch = torch.full((batch_size,), int(t), device=device, dtype=torch.long)
 
-        z = torch.randn_like(x)
-        x = torch.sqrt(alpha[t]) * x + torch.sqrt(beta[t]) * z
+        eps = model(x, t_batch)[:, :3, :, :]
+        xhat = (x - torch.sqrt(torch.clamp(betabar[t], min=1e-12)) * eps) / torch.sqrt(torch.clamp(alphabar[t], min=1e-12))
+        xhat = torch.clamp(xhat, -1.0, 1.0)
+
+        mu = (x - (beta[t] / torch.sqrt(torch.clamp(betabar[t], min=1e-12))) * eps) / torch.sqrt(torch.clamp(alpha[t], min=1e-12))
+
+        if t > 0:
+            z = torch.randn_like(x)
+        else:
+            z = torch.zeros_like(x)
+
+        x = mu + torch.sqrt(torch.clamp(beta[t], min=0.0)) * z
+        x = torch.nan_to_num(x, nan=0.0, posinf=1.0, neginf=-1.0).detach()
 
         psnr_x = psnr(x, x0)
         psnrhat = psnr(xhat, x0)
