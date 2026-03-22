@@ -82,7 +82,7 @@ def pseudoinverse_guided_sample_ddim(
     save = diffusion_config['save']
     mode = diffusion_config['mode']
     num_train_steps = diffusion_config["num_timesteps"]
-    num_inference_steps = diffusion_config.get("num_inference_steps", 100)
+    num_inference_steps = diffusion_config["num_inference_steps"]
     eta = diffusion_config.get("eta", 0.0)
     sigma_y = diffusion_config.get("sigma_y", 0.01)
     guidance_scale = diffusion_config.get("guidance_scale", 1.0)
@@ -245,7 +245,7 @@ def dps_sample_diffsion(
 
         eps = model(x, t_batch)[:, :3, :, :]
         xhat = (x - torch.sqrt(torch.clamp(betabar[t], min=1e-12)) * eps) / torch.sqrt(torch.clamp(alphabar[t], min=1e-12))
-        # xhat = torch.clamp(xhat, -1.0, 1.0)
+        xhat = torch.clamp(xhat, -1.0, 1.0)
 
         error = (operator.H(xhat) - y).pow(2).sum()
         grad = torch.autograd.grad(error, x)[0]
@@ -268,7 +268,7 @@ def dps_sample_diffsion(
 
     return x, psnr_list
 
-
+@torch.no_grad()
 def simple_ddpm(
     model,
     diffusion_config,
@@ -315,8 +315,8 @@ def simple_ddpm(
         x = mu + torch.sqrt(torch.clamp(beta[t], min=0.0)) * z
         x = torch.nan_to_num(x, nan=0.0, posinf=1.0, neginf=-1.0).detach()
 
-        psnr_x = psnr(x, x0)
-        psnrhat = psnr(xhat, x0)
+        psnr_x = psnr(x, x0.detach())
+        psnrhat = psnr(xhat, x0.detach())
 
         psnrx.append(psnr_x)
         psnrxhat.append(psnrhat)
@@ -325,7 +325,7 @@ def simple_ddpm(
             print('Iteration :', t+1)
             save_grid(torch.cat((x, xhat, x0), dim=3), path=f"./samples/{dir}/ddpm_no_guidance_output_t={t}.png")
         
-    plot_scalar_logs({"psnrx": psnrx, "psnrxhat": psnrxhat}, path=f"./samples/{dir}/ddpm_no_guidance_psnr.png")
+    plot_scalar_logs({"psnrx": psnrx, "psnrxhat": psnrxhat}, outdir=f"./samples/{dir}/ddpm_no_guidance_psnr.png")
     
     import csv
     csv_path = f"./samples/{dir}/ddpm_no_guidance_psnr.csv"
@@ -333,5 +333,6 @@ def simple_ddpm(
         with open(csv_path, mode='w', newline='') as file:
             writer = csv.writer(file)
             writer.writerow(["timestep", "psnr_x", "psnr_xhat"])
-
+            for i in range(len(psnrx)):
+                writer.writerow([reversed_time_steps[i], psnrx[i], psnrxhat[i]])
     return x

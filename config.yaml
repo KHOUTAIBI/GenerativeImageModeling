@@ -1,5 +1,5 @@
 diffusion_config:
-  num_timesteps: 1000
+  num_timesteps: 5
   beta_init: 0.0001
   beta_end: 0.02
   num_inference_steps: 100
@@ -7,8 +7,8 @@ diffusion_config:
   sigma_y: 0.1
   guidance_scale: 0.1
   sampler: ddim
-  save : true
-  mode : super_res
+  save: true
+  mode: super_res
 
 model_config:
   im_channels: 3
@@ -17,4 +17,3 @@ model_config:
 train_config:
   image_index: 100
   num_grid_rows: 1
-
