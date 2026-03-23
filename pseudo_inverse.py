@@ -118,25 +118,22 @@ def run(args):
                     writer.writerow([idx, psnr_list[-1], ellapsed])
 
     elif sampler == "ddim_pseudo_guidance":
-        
         for idx in indexes:
-
-            for idx in indexes:
-                x0 = im2tensor(plt.imread("ffhq256-1k-validation/" + str(idx).zfill(5) + ".png")).to(device)
-                imgshape = x0.shape
-                y = operator.observe(x0, sigma_y=sigma_noise)
-                start = time()
-                x_rec, psnr_list = pseudoinverse_guided_sample_ddim(
-                    model=model,
-                    scheduler=scheduler,
-                    diffusion_config=diffusion_config,
-                    operator=operator,
-                    x0 = x0,
-                    y=y,
-                )
-                end = time()
-                ellapsed = end - start
-                times.append(ellapsed)
+            x0 = im2tensor(plt.imread("ffhq256-1k-validation/" + str(idx).zfill(5) + ".png")).to(device)
+            imgshape = x0.shape
+            y = operator.observe(x0, sigma_y=sigma_noise)
+            start = time()
+            x_rec, psnr_list = pseudoinverse_guided_sample_ddim(
+                model=model,
+                scheduler=scheduler,
+                diffusion_config=diffusion_config,
+                operator=operator,
+                x0 = x0,
+                y=y,
+            )
+            end = time()
+            ellapsed = end - start
+            times.append(ellapsed)
 
     elif sampler == "ddpm_dps":
 
