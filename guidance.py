@@ -134,10 +134,10 @@ def pseudoinverse_guided_sample_ddim(
 
         x = torch.nan_to_num(x_next, nan=0.0, posinf=1.0, neginf=-1.0).detach()
         psnr_list.append(psnr_x)
+        recon_list.append(x)
 
         if i % 25 == 0 and save:
             save_grid(hatx_t, path=f"./samples/pigdm_ddim_output_t={i}.png")
-            recon_list.append(x)
 
     recon_list.append(x)
 
@@ -211,10 +211,10 @@ def pseudoinverse_guided_sample_ddpm(
 
         psnr_x = psnr(x0, x)
         psnr_list.append(psnr_x)
+        recon_list.append(x)
 
         if i % 100 == 0 and save:
             save_grid(x, path=f"./samples/pigdm_ddpm_output_t={i}.png")
-            recon_list.append(x)
     
     recon_list.append(x)
     
@@ -279,10 +279,10 @@ def dps_sample_ddpm(
 
         psnr_x = psnr(x0, x)
         psnr_list.append(psnr_x)
+        recon_list.append(x)
 
         if (i % 100 == 0 or t == 0) and save:
             save_grid(x, path=f"./samples/dps_ddpm_output_t={t}.png")
-            recon_list.append(x)
 
     recon_list.append(x)
 
@@ -346,10 +346,10 @@ def dps_sample_ddim(
 
         x = torch.nan_to_num(x_next, nan=0.0, posinf=1.0, neginf=-1.0).detach()
         psnr_list.append(psnr_x)
+        recon_list.append(x)
 
         if i % 25 == 0 and save:
             save_grid(hatx_t, path=f"./samples/ddim_dps_outpu_t={i}.png")
-            recon_list.append(x)
     
     recon_list.append(x)
 

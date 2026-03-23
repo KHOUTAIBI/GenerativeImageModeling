@@ -84,15 +84,7 @@ def run(args):
     operator = operator_motion_blur
 
     sigma_noise = diffusion_config.get("sigma_y", 0.01)
-    y = operator.observe(x0, sigma_y=sigma_noise)
-
-    save_grid(y, path="./samples/y_init.png")
-    save_grid(operator.H(x0), path="./samples/y_clean.png")
-    save_grid(x0, path="./samples/x0.png")
-
-    x_init = torch.randn_like(x0)
-    save_grid(x_init, args.pinv_init_path, nrow=train_config["num_grid_rows"])
-
+    
     sampler = diffusion_config.get("sampler", "ddim").lower()
 
     params = {

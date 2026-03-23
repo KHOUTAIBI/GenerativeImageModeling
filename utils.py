@@ -176,7 +176,8 @@ def benchmark_denoiser(
 
         if len(psnrs) > 0:
             writer.writerow([])
-            writer.writerow(["mean_psnr", sum(psnrs) / len(psnrs), "mean_time", sum(times) / len(times)])
+            writer.writerow(["mean_psnr", np.mean(psnr_list), "mean_time", np.mean(times)])
+            writer.writerow(["std_psnr", np.std(psnr_list), "std_time", np.std(times)])
 
     if save_trajectories and len(all_recon_lists) > 0:
         traj_grid_path = os.path.join(
