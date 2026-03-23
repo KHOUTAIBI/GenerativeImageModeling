@@ -131,7 +131,7 @@ def pseudoinverse_guided_sample_ddim(
         psnr_list.append(psnr_x)
 
         if i % 25 == 0 and save:
-            save_grid(hatx_t, path=f"./samples/pigdm_ddim_output_{i}.png")
+            save_grid(hatx_t, path=f"./samples/pigdm_ddim_output_t={i}.png")
 
     return x, psnr_list
 
@@ -203,11 +203,11 @@ def pseudoinverse_guided_sample_ddpm(
         psnr_list.append(psnr_x)
 
         if i % 100 == 0 and save:
-            save_grid(x, path=f"./samples/pigdm_ddpm_output_{i}.png")
+            save_grid(x, path=f"./samples/pigdm_ddpm_output_t={i}.png")
 
     return x, psnr_list
 
-def dps_sample_diffsion(
+def dps_sample_ddpm(
     model,
     diffusion_config,
     operator,
@@ -238,7 +238,7 @@ def dps_sample_diffsion(
     reversed_time_steps = np.arange(num_train_steps)[::-1]
     x = torch.randn_like(x0, device=device)
 
-    for i, t in tqdm(enumerate(reversed_time_steps), total=len(reversed_time_steps), desc="PiGDM-DPS sampling"):
+    for i, t in tqdm(enumerate(reversed_time_steps), total=len(reversed_time_steps), desc="DPS-DDPM sampling"):
 
         x = x.detach().requires_grad_(True)
         t_batch = torch.full((batch_size,), int(t), device=device, dtype=torch.long)
@@ -268,6 +268,68 @@ def dps_sample_diffsion(
 
     return x, psnr_list
 
+def dps_sample_ddim(
+    model,
+    scheduler : NoiseScheduler,
+    diffusion_config,
+    operator,
+    x0,
+    y
+) -> tuple[torch.Tensor, list]:
+    """
+    The pseudo inverse guidance algorithm, In this case we use DDPM instead of DDIM
+    """
+    model.eval()
+
+    batch_size = y.shape[0]
+
+    save = diffusion_config['save']
+    num_train_steps = diffusion_config["num_timesteps"]
+    num_inference_steps = diffusion_config["num_inference_steps"]
+    eta = diffusion_config["eta"]
+    guidance_scale = diffusion_config["guidance_scale"]
+
+    timesteps = np.linspace(0, num_train_steps - 1, num_inference_steps, dtype=int)[::-1]
+    x = torch.randn_like(x0, device=y.device)
+
+    psnr_list = []
+    alpha = scheduler.alpha_bar.to(y.device)
+
+    for i, t in enumerate(tqdm(timesteps, desc="PiGDM-DDIM sampling")):
+        s = timesteps[i + 1] if i + 1 < len(timesteps) else 0
+        t_batch = torch.full((batch_size,), int(t), device=device, dtype=torch.long)
+
+        x = x.detach().requires_grad_(True)
+
+        eps_theta = model(x, t_batch)[:, :3, :, :]
+
+        alpha_t = alpha[t].view(1, 1, 1, 1)
+        alpha_s = alpha[s].view(1, 1, 1, 1)
+
+        hatx_t = predict_x0_from_eps(x, eps_theta, alpha_t)
+        hatx_t = torch.clamp(hatx_t, -1.0, 1.0)
+
+        error = (operator.H(hatx_t) - y).pow(2).sum()
+        grad = torch.autograd.grad(error, x)[0]
+
+        grad = torch.nan_to_num(grad, nan=0.0, posinf=0.0, neginf=0.0)
+
+        x_ddim = ddim_step_from_x0_eps(hatx_t, eps_theta, alpha_t, alpha_s, eta)
+        x_next = x_ddim - guidance_scale * grad / torch.sqrt(error.detach())
+
+        psnr_x = psnr(x0, x_next)
+
+        x = torch.nan_to_num(x_next, nan=0.0, posinf=1.0, neginf=-1.0).detach()
+        psnr_list.append(psnr_x)
+
+        if i % 25 == 0 and save:
+            save_grid(hatx_t, path=f"./samples/ddim_dps_outpu_t={i}.png")
+
+    return x, psnr_list
+
+# -------------------------
+# useless may remove
+# -------------------------
 @torch.no_grad()
 def simple_ddpm(
     model,

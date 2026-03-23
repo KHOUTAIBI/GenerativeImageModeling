@@ -93,23 +93,7 @@ def run(args):
 
     sampler = diffusion_config.get("sampler", "ddim").lower()
 
-    if sampler == "ddpm_no_guidance":
-        for idx in indexes:
-            x0 = im2tensor(plt.imread("ffhq256-1k-validation/" + str(idx).zfill(5) + ".png")).to(device)
-            imgshape = x0.shape
-            y = operator.observe(x0, sigma_y=sigma_noise)
-            start = time()
-            x_rec = simple_ddpm(
-                model=model,
-                diffusion_config=diffusion_config,
-                y=y,
-                x0 = x0,
-            )
-            psnr_list = [] # Attn
-            end = time()
-            ellapsed = end - start
-            times.append(ellapsed)
-    elif sampler == "ddpm":
+    if sampler == "ddpm_pseudo_guidance":
         
         for idx in indexes:
             x0 = im2tensor(plt.imread("ffhq256-1k-validation/" + str(idx).zfill(5) + ".png")).to(device)
@@ -127,7 +111,7 @@ def run(args):
             ellapsed = end - start
             times.append(ellapsed)
 
-    elif sampler == "ddim":
+    elif sampler == "ddim_pseudo_guidance":
         
         for idx in indexes:
 
@@ -148,13 +132,14 @@ def run(args):
                 ellapsed = end - start
                 times.append(ellapsed)
 
-    else :
+    elif sampler == "ddpm_dps":
+
         for idx in indexes:
             x0 = im2tensor(plt.imread("ffhq256-1k-validation/" + str(idx).zfill(5) + ".png")).to(device)
             imgshape = x0.shape
             y = operator.observe(x0, sigma_y=sigma_noise)
             start = time()
-            x_rec, psnr_list = dps_sample_diffsion(
+            x_rec, psnr_list = dps_sample_ddpm(
                 model=model,
                 diffusion_config=diffusion_config,
                 operator=operator,
@@ -165,6 +150,30 @@ def run(args):
             ellapsed = end - start
             times.append(ellapsed)
 
+    elif sampler == "ddim_dps":
+        for idx in indexes:
+            x0 = im2tensor(plt.imread("ffhq256-1k-validation/" + str(idx).zfill(5) + ".png")).to(device)
+            imgshape = x0.shape
+            y = operator.observe(x0, sigma_y=sigma_noise)
+            start = time()
+            x_rec, psnr_list = dps_sample_ddim(
+                model=model,
+                scheduler=scheduler,
+                diffusion_config=diffusion_config,
+                operator=operator,
+                x0 = x0,
+                y=y,
+            )
+            end = time()
+            ellapsed = end - start
+            times.append(ellapsed)
+
+    else :
+        raise ValueError(
+                "Invalid Denoiser, please choose between: "
+                "ddpm_pseudo_guidance, ddim_pseudo_guidance, ddpm_dps and ddim_dps"
+        )
+    
     print(f"Mean ellapsed time is: {np.mean(times):.5}s and std ellapsed time is: {np.std(times):.5}s")
 
     os.makedirs(os.path.dirname(args.output_path), exist_ok=True)

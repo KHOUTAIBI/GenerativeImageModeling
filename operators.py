@@ -161,7 +161,7 @@ class SuperResolutionOperator:
         mode_up="bicubic",
     ):
         
-        self.type = "nonlinear"
+        self.type = "linear"
         self.image_shape = image_shape
         self.n = int(np.prod(image_shape))
         self.m = measurement_dim
