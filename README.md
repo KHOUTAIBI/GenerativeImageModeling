@@ -1,4 +1,5 @@
 [Report](https://fr.overleaf.com/6831962659qxwfccgrbhtr#d66384)
+![alt text](https://github.com/KHOUTAIBI/GenerativeImageModeling/blob/main/samples/ddim_pseudo_guidance_benchmark_trajectories.png)
 
 # Generative Image Modeling
 
