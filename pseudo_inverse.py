@@ -13,6 +13,7 @@ def run(args):
     diffusion_config = config["diffusion_config"]
     train_config = config["train_config"]
     image_index = train_config["image_index"]
+    indexes_range = diffusion_config["indexes_range"]
 
     model_kwargs = {
         "image_size": 256,
@@ -46,10 +47,8 @@ def run(args):
         device=device,
     )
 
-    idx = image_index
-    indexes = np.arange(idx, idx + config["number_images"], 1)
     times = list()
-    x0 = im2tensor(plt.imread("ffhq256-1k-validation/" + str(idx).zfill(5) + ".png")).to(device)
+    x0 = im2tensor(plt.imread("ffhq256-1k-validation/" + str(image_index).zfill(5) + ".png")).to(device)
     imgshape = x0.shape
 
     # OPERATORS AND KERNELS
@@ -97,7 +96,7 @@ def run(args):
     sampler = diffusion_config.get("sampler", "ddim").lower()
 
     params = {
-        "indexes": range(0, 5, 1),
+        "indexes": range(image_index, image_index + indexes_range, 1),
         "model": model,
         "diffusion_config": diffusion_config,
         "config": config,
@@ -141,6 +140,7 @@ def run(args):
         )
 
     else :
+        
         raise ValueError(
                 "Invalid Denoiser, please choose between: "
                 "ddpm_pseudo_guidance, ddim_pseudo_guidance, ddpm_dps and ddim_dps"

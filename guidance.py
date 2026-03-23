@@ -8,6 +8,14 @@ from noise_scheduler import NoiseScheduler
 from utils import (psnr, 
                    save_grid)
 
+from explainability import (
+    save_heatmap,
+    tensor_norm,
+    cosine_similarity_map,
+    compute_input_saliency,
+    plot_scalar_logs,
+)
+
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 def predict_x0_from_eps(x_t, eps_theta, alpha_t) -> torch.Tensor:
@@ -59,13 +67,6 @@ def ddim_step_from_x0_eps(x0_hat, eps_theta, alpha_t, alpha_s, eta) -> torch.Ten
     return x_s
 
 
-from explainability import (
-    save_heatmap,
-    tensor_norm,
-    cosine_similarity_map,
-    compute_input_saliency,
-    plot_scalar_logs,
-)
 
 def pseudoinverse_guided_sample_ddim(
     model,
@@ -76,13 +77,13 @@ def pseudoinverse_guided_sample_ddim(
     y,
     *args,
     **kwargs,
-):
+)-> tuple[torch.Tensor, list, list[torch.Tensor]]:
+    
     model.eval()
 
     batch_size = y.shape[0]
 
     save = diffusion_config['save']
-    mode = diffusion_config['mode']
     num_train_steps = diffusion_config["num_timesteps"]
     num_inference_steps = diffusion_config["num_inference_steps"]
     eta = diffusion_config.get("eta", 0.0)
@@ -92,7 +93,10 @@ def pseudoinverse_guided_sample_ddim(
     timesteps = np.linspace(0, num_train_steps - 1, num_inference_steps, dtype=int)[::-1]
     x = torch.randn_like(x0, device=y.device)
 
-    psnr_list = []
+    psnr_list = list()
+    recon_list = list()
+    recon_list.append(y)
+
     alpha = scheduler.alpha_bar.to(y.device)
 
     for i, t in enumerate(tqdm(timesteps, desc="PiGDM-DDIM sampling")):
@@ -133,8 +137,11 @@ def pseudoinverse_guided_sample_ddim(
 
         if i % 25 == 0 and save:
             save_grid(hatx_t, path=f"./samples/pigdm_ddim_output_t={i}.png")
+            recon_list.append(x)
 
-    return x, psnr_list
+    recon_list.append(x)
+
+    return x, psnr_list, recon_list
 
 
 def pseudoinverse_guided_sample_ddpm(
@@ -145,14 +152,13 @@ def pseudoinverse_guided_sample_ddpm(
     y,
     *args,
     **kwargs,
-) -> tuple[torch.Tensor, list]:
+) -> tuple[torch.Tensor, list, list[torch.Tensor]]:
     """
     The pseudo inverse guidance algorithm, In this case we use DDPM instead of DDIM
     """
     model.eval()
 
     save = diffusion_config['save']
-    mode = diffusion_config['mode']
     num_train_steps = diffusion_config["num_timesteps"]
     beta_start = diffusion_config["beta_init"]
     beta_end = diffusion_config["beta_end"]
@@ -165,6 +171,8 @@ def pseudoinverse_guided_sample_ddpm(
     betabar = 1.0 - alphabar
 
     psnr_list = list()
+    recon_list = list()
+    recon_list.append(y)
 
     batch_size = y.shape[0]
     reversed_time_steps = np.arange(num_train_steps)[::-1]
@@ -206,8 +214,11 @@ def pseudoinverse_guided_sample_ddpm(
 
         if i % 100 == 0 and save:
             save_grid(x, path=f"./samples/pigdm_ddpm_output_t={i}.png")
-
-    return x, psnr_list
+            recon_list.append(x)
+    
+    recon_list.append(x)
+    
+    return x, psnr_list, recon_list
 
 def dps_sample_ddpm(
     model,
@@ -217,7 +228,7 @@ def dps_sample_ddpm(
     y,
     *args,
     **kwargs,
-) -> tuple[torch.Tensor, list]:
+) -> tuple[torch.Tensor, list, list[torch.Tensor]]:
     
     """
         The DPS algorithm as seen in the practical session, which uses DDPM and calculates the gradient of the error
@@ -237,6 +248,8 @@ def dps_sample_ddpm(
     betabar = 1.0 - alphabar
 
     psnr_list = list()
+    recon_list = list()
+    recon_list.append(y)
 
     batch_size = y.shape[0]
     reversed_time_steps = np.arange(num_train_steps)[::-1]
@@ -269,8 +282,11 @@ def dps_sample_ddpm(
 
         if (i % 100 == 0 or t == 0) and save:
             save_grid(x, path=f"./samples/dps_ddpm_output_t={t}.png")
+            recon_list.append(x)
 
-    return x, psnr_list
+    recon_list.append(x)
+
+    return x, psnr_list, recon_list
 
 def dps_sample_ddim(
     model,
@@ -281,7 +297,7 @@ def dps_sample_ddim(
     y,
     *args,
     **kwargs,
-) -> tuple[torch.Tensor, list]:
+) -> tuple[torch.Tensor, list, list[torch.Tensor]]:
     """
     The pseudo inverse guidance algorithm, In this case we use DDPM instead of DDIM
     """
@@ -298,7 +314,10 @@ def dps_sample_ddim(
     timesteps = np.linspace(0, num_train_steps - 1, num_inference_steps, dtype=int)[::-1]
     x = torch.randn_like(x0, device=y.device)
 
-    psnr_list = []
+    psnr_list = list()
+    recon_list = list()
+    recon_list.append(y)
+
     alpha = scheduler.alpha_bar.to(y.device)
 
     for i, t in enumerate(tqdm(timesteps, desc="PiGDM-DDIM sampling")):
@@ -330,8 +349,11 @@ def dps_sample_ddim(
 
         if i % 25 == 0 and save:
             save_grid(hatx_t, path=f"./samples/ddim_dps_outpu_t={i}.png")
+            recon_list.append(x)
+    
+    recon_list.append(x)
 
-    return x, psnr_list
+    return x, psnr_list, recon_list
 
 
 # -------------------------

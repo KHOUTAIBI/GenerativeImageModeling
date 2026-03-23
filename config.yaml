@@ -3,6 +3,7 @@ diffusion_config:
   beta_init: 0.0001
   beta_end: 0.02
   num_inference_steps: 100
+  indexes_range : 16
   eta: 0.0
   sigma_y: 0.1
   guidance_scale: 0.1

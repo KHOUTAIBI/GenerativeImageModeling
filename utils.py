@@ -2,7 +2,7 @@ import torch
 import torchvision
 import numpy as np
 import matplotlib.pyplot as plt
-from torchvision.utils import make_grid
+from torchvision.utils import make_grid, save_image
 import csv
 import os
 from time import time
@@ -40,6 +40,84 @@ def save_grid(x, path, nrow=8):
     img.close()
 
 
+def _ensure_batched(img: torch.Tensor) -> torch.Tensor:
+    """
+    Convert [C,H,W] -> [1,C,H,W], keep [B,C,H,W] unchanged.
+    """
+    if img.dim() == 3:
+        return img.unsqueeze(0)
+    return img
+
+
+def _to_display_range(img: torch.Tensor) -> torch.Tensor:
+    """
+    Clamp to [-1,1] for diffusion outputs.
+    """
+    return torch.clamp(img, -1.0, 1.0)
+
+
+def save_benchmark_trajectory_grid(
+    recon_lists,
+    save_path,
+    max_frames=10,
+    value_range=(-1, 1),
+):
+    """
+    recon_lists: list of trajectories
+        each trajectory is a list of tensors [C,H,W] or [1,C,H,W]
+
+    Output:
+        one image grid with one row per benchmarked image
+        and one column per saved timestep
+    """
+    if len(recon_lists) == 0:
+        return
+
+    processed_rows = []
+
+    for recon_list in recon_lists:
+        if len(recon_list) == 0:
+            continue
+
+        # subsample frames uniformly if needed
+        if len(recon_list) > max_frames:
+            idxs = torch.linspace(0, len(recon_list) - 1, steps=max_frames).long().tolist()
+            recon_list = [recon_list[i] for i in idxs]
+
+        row = []
+        for x in recon_list:
+            if x.dim() == 3:
+                x = x.unsqueeze(0)   # [1,C,H,W]
+            x = x.detach().cpu().clamp(-1.0, 1.0)
+            row.append(x)
+
+        # shape: [K,C,H,W]
+        row = torch.cat(row, dim=0)
+        processed_rows.append(row)
+
+    if len(processed_rows) == 0:
+        return
+
+    # all rows must have same number of frames
+    num_cols = min(row.shape[0] for row in processed_rows)
+    processed_rows = [row[:num_cols] for row in processed_rows]
+
+    # stack rows one after another -> [N*K,C,H,W]
+    grid_tensor = torch.cat(processed_rows, dim=0)
+
+    grid = make_grid(
+        grid_tensor,
+        nrow=num_cols,
+        normalize=True,
+        value_range=value_range,
+        padding=2,
+    )
+    save_image(grid, save_path)
+
+
+# --------------------------------
+# Benchmarking PSNR and images in grid
+# --------------------------------
 def benchmark_denoiser(
     sampler_fn,
     sampler_name,
@@ -50,44 +128,64 @@ def benchmark_denoiser(
     sigma_noise,
     config,
     device,
+    save_trajectories=True,
+    max_trajectory_frames=10,
     **sampler_kwargs,
 ):
-   
     csv_path = config["csv_path"] + f"_{sampler_name}.csv"
+    samples_dir = config.get("samples_dir", "./samples")
+    os.makedirs(samples_dir, exist_ok=True)
 
     times = []
     psnrs = []
+    all_recon_lists = []
 
-    if not os.path.exists(csv_path):
-        with open(csv_path, mode="w", newline="") as file:
-            
-            writer = csv.writer(file)
-            writer.writerow(["idx", "psnr", "elapsed_time"])
+    with open(csv_path, mode="w", newline="") as file:
+        writer = csv.writer(file)
+        writer.writerow(["idx", "psnr", "elapsed_time"])
 
-            for idx in indexes:
-                x0 = im2tensor(
-                    plt.imread(f"ffhq256-1k-validation/{str(idx).zfill(5)}.png")
-                ).to(device)
+        for idx in indexes:
+            x0 = im2tensor(
+                plt.imread(f"ffhq256-1k-validation/{str(idx).zfill(5)}.png")
+            ).to(device)
 
-                y = operator.observe(x0, sigma_y=sigma_noise)
+            x0 = _ensure_batched(x0)
+            y = operator.observe(x0, sigma_y=sigma_noise)
 
-                start = time()
-                x_rec, psnr_list = sampler_fn(
-                    model=model,
-                    diffusion_config=diffusion_config,
-                    operator=operator,
-                    x0=x0,
-                    y=y,
-                    **sampler_kwargs,
-                )
-                end = time()
+            start = time()
+            x_rec, psnr_list, recon_list = sampler_fn(
+                model=model,
+                diffusion_config=diffusion_config,
+                operator=operator,
+                x0=x0,
+                y=y,
+                **sampler_kwargs,
+            )
+            end = time()
 
-                elapsed = end - start
-                final_psnr = psnr_list[-1]
+            elapsed = end - start
+            final_psnr = psnr_list[-1]
 
-                times.append(elapsed)
-                psnrs.append(final_psnr)
+            times.append(elapsed)
+            psnrs.append(final_psnr)
 
-                writer.writerow([idx, final_psnr, elapsed])
+            writer.writerow([idx, final_psnr, elapsed])
+
+            if save_trajectories:
+                all_recon_lists.append(recon_list)
+
+        if len(psnrs) > 0:
+            writer.writerow([])
+            writer.writerow(["mean_psnr", sum(psnrs) / len(psnrs), "mean_time", sum(times) / len(times)])
+
+    if save_trajectories and len(all_recon_lists) > 0:
+        traj_grid_path = os.path.join(
+            samples_dir, f"{sampler_name}_benchmark_trajectories.png"
+        )
+        save_benchmark_trajectory_grid(
+            recon_lists=all_recon_lists,
+            save_path=traj_grid_path,
+            max_frames=max_trajectory_frames,
+        )
 
     return psnrs, times
