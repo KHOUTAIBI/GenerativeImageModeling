@@ -97,7 +97,7 @@ def run(args):
     sampler = diffusion_config.get("sampler", "ddim").lower()
 
     params = {
-        "indexes": range(0, 10, 1),
+        "indexes": range(0, 5, 1),
         "model": model,
         "diffusion_config": diffusion_config,
         "config": config,
@@ -147,6 +147,7 @@ def run(args):
         )
     
     print(f"Mean ellapsed time is: {np.mean(times):.5}s and std ellapsed time is: {np.std(times):.5}s")
+    print(f"Mean psnr is: {np.mean(psnr_list):.5}dB and std psnr is: {np.std(psnr_list):.5}dB")
 
 
 if __name__ == "__main__":
