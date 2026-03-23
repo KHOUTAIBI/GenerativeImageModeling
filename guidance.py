@@ -19,7 +19,7 @@ def predict_x0_from_eps(x_t, eps_theta, alpha_t) -> torch.Tensor:
     x0_hat = (x_t - sqrt_one_minus_alpha_t * eps_theta) / sqrt_alpha_t
     return x0_hat
 
-def compute_pseudoinverse_guidance(x_t, hatx_t, y, operator , sigma_y, r_t, mode) -> torch.Tensor:
+def compute_pseudoinverse_guidance(x_t, hatx_t, y, operator , sigma_y, r_t) -> torch.Tensor:
     """
         Computing the guidance term in the case of linear and non linear operations
         WARNING:
@@ -74,6 +74,8 @@ def pseudoinverse_guided_sample_ddim(
     operator,
     x0,
     y,
+    *args,
+    **kwargs,
 ):
     model.eval()
 
@@ -116,7 +118,6 @@ def pseudoinverse_guided_sample_ddim(
             operator=operator,
             sigma_y=sigma_y,
             r_t=r_t,
-            mode=mode,
         )
 
         guidance = torch.nan_to_num(guidance, nan=0.0, posinf=0.0, neginf=0.0)
@@ -141,7 +142,9 @@ def pseudoinverse_guided_sample_ddpm(
     diffusion_config,
     operator,
     x0,
-    y
+    y,
+    *args,
+    **kwargs,
 ) -> tuple[torch.Tensor, list]:
     """
     The pseudo inverse guidance algorithm, In this case we use DDPM instead of DDIM
@@ -187,7 +190,6 @@ def pseudoinverse_guided_sample_ddpm(
             operator=operator,
             sigma_y=sigma_y,
             r_t=r_t,
-            mode = mode
         )
         guidance = torch.nan_to_num(guidance, nan=0.0, posinf=0.0, neginf=0.0)
 
@@ -212,7 +214,9 @@ def dps_sample_ddpm(
     diffusion_config,
     operator,
     x0,
-    y  
+    y,
+    *args,
+    **kwargs,
 ) -> tuple[torch.Tensor, list]:
     
     """
@@ -274,7 +278,9 @@ def dps_sample_ddim(
     diffusion_config,
     operator,
     x0,
-    y
+    y,
+    *args,
+    **kwargs,
 ) -> tuple[torch.Tensor, list]:
     """
     The pseudo inverse guidance algorithm, In this case we use DDPM instead of DDIM
@@ -326,6 +332,7 @@ def dps_sample_ddim(
             save_grid(hatx_t, path=f"./samples/ddim_dps_outpu_t={i}.png")
 
     return x, psnr_list
+
 
 # -------------------------
 # useless may remove

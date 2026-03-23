@@ -19,4 +19,5 @@ train_config:
   num_grid_rows: 1
 
 number_images: 16
+
 csv_path: "samples/results"

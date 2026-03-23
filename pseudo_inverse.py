@@ -1,4 +1,6 @@
 from guided_diffusion.unet import create_model
+import yaml
+import argparse
 from utils import *
 from operators import *
 from guidance import *
@@ -50,6 +52,7 @@ def run(args):
     x0 = im2tensor(plt.imread("ffhq256-1k-validation/" + str(idx).zfill(5) + ".png")).to(device)
     imgshape = x0.shape
 
+    # OPERATORS AND KERNELS
     kernel = torch.tensor(np.loadtxt('kernels/kernel8.txt')).to(device)
 
     operator_mask = MaskOperator(
@@ -93,83 +96,49 @@ def run(args):
 
     sampler = diffusion_config.get("sampler", "ddim").lower()
 
+    params = {
+        "indexes": range(0, 10, 1),
+        "model": model,
+        "diffusion_config": diffusion_config,
+        "config": config,
+        "sigma_noise": sigma_noise,
+        "device": device,
+        "operator": operator,
+        "scheduler": scheduler,
+    }
+
     if sampler == "ddpm_pseudo_guidance":
-        csv_path = config["csv_path"] + f"_{sampler}.csv"
-        import csv
-        if not os.path.exists(csv_path):
-            with open(csv_path, mode='w', newline='') as file:
-                writer = csv.writer(file)
-                writer.writerow(["idx", "psnr", "ellapsed_time"])
-                for idx in indexes:
-                    x0 = im2tensor(plt.imread("ffhq256-1k-validation/" + str(idx).zfill(5) + ".png")).to(device)
-                    imgshape = x0.shape
-                    y = operator.observe(x0, sigma_y=sigma_noise)
-                    start = time()
-                    x_rec, psnr_list = pseudoinverse_guided_sample_ddpm(
-                        model=model,
-                        diffusion_config=diffusion_config,
-                        operator=operator,
-                        x0 = x0,
-                        y=y,
-                    )
-                    end = time()
-                    ellapsed = end - start
-                    times.append(ellapsed)
-                    writer.writerow([idx, psnr_list[-1], ellapsed])
+
+        psnr_list, times = benchmark_denoiser(
+            sampler_fn=pseudoinverse_guided_sample_ddpm,
+            sampler_name="ddpm_pseudo_guidance",
+            **params,
+        )
 
     elif sampler == "ddim_pseudo_guidance":
-        for idx in indexes:
-            x0 = im2tensor(plt.imread("ffhq256-1k-validation/" + str(idx).zfill(5) + ".png")).to(device)
-            imgshape = x0.shape
-            y = operator.observe(x0, sigma_y=sigma_noise)
-            start = time()
-            x_rec, psnr_list = pseudoinverse_guided_sample_ddim(
-                model=model,
-                scheduler=scheduler,
-                diffusion_config=diffusion_config,
-                operator=operator,
-                x0 = x0,
-                y=y,
-            )
-            end = time()
-            ellapsed = end - start
-            times.append(ellapsed)
+        
+        psnr_list, times = benchmark_denoiser(
+            sampler_fn=pseudoinverse_guided_sample_ddim,
+            sampler_name="ddim_pseudo_guidance",
+            **params,
+        )
+        
 
     elif sampler == "ddpm_dps":
 
-        for idx in indexes:
-            x0 = im2tensor(plt.imread("ffhq256-1k-validation/" + str(idx).zfill(5) + ".png")).to(device)
-            imgshape = x0.shape
-            y = operator.observe(x0, sigma_y=sigma_noise)
-            start = time()
-            x_rec, psnr_list = dps_sample_ddpm(
-                model=model,
-                diffusion_config=diffusion_config,
-                operator=operator,
-                x0 = x0,
-                y=y,
-            )
-            end = time()
-            ellapsed = end - start
-            times.append(ellapsed)
+        psnr_list, times = benchmark_denoiser(
+            sampler_fn=dps_sample_ddpm,
+            sampler_name="ddpm_dps",
+            **params,
+        )
 
     elif sampler == "ddim_dps":
-        for idx in indexes:
-            x0 = im2tensor(plt.imread("ffhq256-1k-validation/" + str(idx).zfill(5) + ".png")).to(device)
-            imgshape = x0.shape
-            y = operator.observe(x0, sigma_y=sigma_noise)
-            start = time()
-            x_rec, psnr_list = dps_sample_ddim(
-                model=model,
-                scheduler=scheduler,
-                diffusion_config=diffusion_config,
-                operator=operator,
-                x0 = x0,
-                y=y,
-            )
-            end = time()
-            ellapsed = end - start
-            times.append(ellapsed)
+
+        psnr_list, times = benchmark_denoiser(
+            sampler_fn=dps_sample_ddim,
+            sampler_name="ddim_dps",
+            **params,
+        )
 
     else :
         raise ValueError(
@@ -178,15 +147,6 @@ def run(args):
         )
     
     print(f"Mean ellapsed time is: {np.mean(times):.5}s and std ellapsed time is: {np.std(times):.5}s")
-
-    os.makedirs(os.path.dirname(args.output_path), exist_ok=True)
-    save_grid(x_rec, args.output_path, nrow=train_config["num_grid_rows"])
-    plt.plot(np.arange(len(psnr_list)), psnr_list)
-    plt.grid()
-    plt.xlabel("Step")
-    plt.ylabel("PSNR")
-    plt.savefig(args.psnr_path + f"_{sampler}.png")
-    print(f"Saved reconstruction grid to: {args.output_path}")
 
 
 if __name__ == "__main__":

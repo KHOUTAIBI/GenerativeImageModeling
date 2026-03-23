@@ -3,9 +3,7 @@ import torchvision
 import numpy as np
 import matplotlib.pyplot as plt
 from torchvision.utils import make_grid
-from tqdm import tqdm
-import yaml
-import argparse
+import csv
 import os
 from time import time
 
@@ -40,3 +38,56 @@ def save_grid(x, path, nrow=8):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     img.save(path)
     img.close()
+
+
+def benchmark_denoiser(
+    sampler_fn,
+    sampler_name,
+    indexes,
+    model,
+    operator,
+    diffusion_config,
+    sigma_noise,
+    config,
+    device,
+    **sampler_kwargs,
+):
+   
+    csv_path = config["csv_path"] + f"_{sampler_name}.csv"
+
+    times = []
+    psnrs = []
+
+    if not os.path.exists(csv_path):
+        with open(csv_path, mode="w", newline="") as file:
+            
+            writer = csv.writer(file)
+            writer.writerow(["idx", "psnr", "elapsed_time"])
+
+            for idx in indexes:
+                x0 = im2tensor(
+                    plt.imread(f"ffhq256-1k-validation/{str(idx).zfill(5)}.png")
+                ).to(device)
+
+                y = operator.observe(x0, sigma_y=sigma_noise)
+
+                start = time()
+                x_rec, psnr_list = sampler_fn(
+                    model=model,
+                    diffusion_config=diffusion_config,
+                    operator=operator,
+                    x0=x0,
+                    y=y,
+                    **sampler_kwargs,
+                )
+                end = time()
+
+                elapsed = end - start
+                final_psnr = psnr_list[-1]
+
+                times.append(elapsed)
+                psnrs.append(final_psnr)
+
+                writer.writerow([idx, final_psnr, elapsed])
+
+    return psnrs, times
