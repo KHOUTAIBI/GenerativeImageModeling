@@ -17,3 +17,6 @@ model_config:
 train_config:
   image_index: 100
   num_grid_rows: 1
+
+number_images: 16
+csv_path: "samples/results"

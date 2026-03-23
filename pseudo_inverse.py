@@ -45,7 +45,7 @@ def run(args):
     )
 
     idx = image_index
-    indexes = np.arange(idx, idx + 1, 1)
+    indexes = np.arange(idx, idx + config["number_images"], 1)
     times = list()
     x0 = im2tensor(plt.imread("ffhq256-1k-validation/" + str(idx).zfill(5) + ".png")).to(device)
     imgshape = x0.shape
@@ -94,22 +94,28 @@ def run(args):
     sampler = diffusion_config.get("sampler", "ddim").lower()
 
     if sampler == "ddpm_pseudo_guidance":
-        
-        for idx in indexes:
-            x0 = im2tensor(plt.imread("ffhq256-1k-validation/" + str(idx).zfill(5) + ".png")).to(device)
-            imgshape = x0.shape
-            y = operator.observe(x0, sigma_y=sigma_noise)
-            start = time()
-            x_rec, psnr_list = pseudoinverse_guided_sample_ddpm(
-                model=model,
-                diffusion_config=diffusion_config,
-                operator=operator,
-                x0 = x0,
-                y=y,
-            )
-            end = time()
-            ellapsed = end - start
-            times.append(ellapsed)
+        csv_path = config["csv_path"] + f"_{sampler}.csv"
+        import csv
+        if not os.path.exists(csv_path):
+            with open(csv_path, mode='w', newline='') as file:
+                writer = csv.writer(file)
+                writer.writerow(["idx", "psnr", "ellapsed_time"])
+                for idx in indexes:
+                    x0 = im2tensor(plt.imread("ffhq256-1k-validation/" + str(idx).zfill(5) + ".png")).to(device)
+                    imgshape = x0.shape
+                    y = operator.observe(x0, sigma_y=sigma_noise)
+                    start = time()
+                    x_rec, psnr_list = pseudoinverse_guided_sample_ddpm(
+                        model=model,
+                        diffusion_config=diffusion_config,
+                        operator=operator,
+                        x0 = x0,
+                        y=y,
+                    )
+                    end = time()
+                    ellapsed = end - start
+                    times.append(ellapsed)
+                    writer.writerow([idx, psnr_list[-1], ellapsed])
 
     elif sampler == "ddim_pseudo_guidance":
         
