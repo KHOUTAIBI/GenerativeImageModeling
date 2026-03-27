@@ -95,7 +95,6 @@ def pseudoinverse_guided_sample_ddim(
 
     psnr_list = list()
     recon_list = list()
-    recon_list.append(y)
 
     alpha = scheduler.alpha_bar.to(y.device)
 
@@ -172,11 +171,11 @@ def pseudoinverse_guided_sample_ddpm(
 
     psnr_list = list()
     recon_list = list()
-    recon_list.append(y)
 
     batch_size = y.shape[0]
     reversed_time_steps = np.arange(num_train_steps)[::-1]
     x = torch.randn_like(x0, device=device)
+    flat_start = 800
 
     for i, t in tqdm(enumerate(reversed_time_steps), total=len(reversed_time_steps), desc="PiGDM-DDPM sampling"):
 
@@ -191,6 +190,7 @@ def pseudoinverse_guided_sample_ddpm(
 
         r_t = torch.sqrt(torch.clamp(1.0 - alphabar[t], min=1e-12))
 
+        
         guidance = compute_pseudoinverse_guidance(
             x_t=x,
             hatx_t=xhat,
@@ -206,7 +206,10 @@ def pseudoinverse_guided_sample_ddpm(
         else:
             z = torch.zeros_like(x)
 
-        x = mu + torch.sqrt(torch.clamp(beta[t], min=0.0)) * z + guidance_scale * torch.sqrt(torch.clamp(alphabar[t], min=1e-12)) * guidance
+        u = min(i / flat_start, 1.0)
+        lambda_t = guidance_scale * 0.5 * (1 - np.cos(np.pi * u))
+
+        x = mu + torch.sqrt(torch.clamp(beta[t], min=0.0)) * z + lambda_t * torch.sqrt(torch.clamp(alphabar[t], min=1e-12)) * guidance
         x = torch.nan_to_num(x, nan=0.0, posinf=1.0, neginf=-1.0).detach()
 
         psnr_x = psnr(x0, x)
@@ -249,7 +252,6 @@ def dps_sample_ddpm(
 
     psnr_list = list()
     recon_list = list()
-    recon_list.append(y)
 
     batch_size = y.shape[0]
     reversed_time_steps = np.arange(num_train_steps)[::-1]
@@ -316,7 +318,6 @@ def dps_sample_ddim(
 
     psnr_list = list()
     recon_list = list()
-    recon_list.append(y)
 
     alpha = scheduler.alpha_bar.to(y.device)
 

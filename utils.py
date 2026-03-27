@@ -61,15 +61,8 @@ def save_benchmark_trajectory_grid(
     save_path,
     max_frames=10,
     value_range=(-1, 1),
+    prefix_len=2, 
 ):
-    """
-    recon_lists: list of trajectories
-        each trajectory is a list of tensors [C,H,W] or [1,C,H,W]
-
-    Output:
-        one image grid with one row per benchmarked image
-        and one column per saved timestep
-    """
     if len(recon_lists) == 0:
         return
 
@@ -79,30 +72,33 @@ def save_benchmark_trajectory_grid(
         if len(recon_list) == 0:
             continue
 
-        # subsample frames uniformly if needed
-        if len(recon_list) > max_frames:
-            idxs = torch.linspace(0, len(recon_list) - 1, steps=max_frames).long().tolist()
-            recon_list = [recon_list[i] for i in idxs]
+        prefix = recon_list[:prefix_len]
+        traj = recon_list[prefix_len:]
+
+        # only subsample trajectory, not prefix
+        remaining = max_frames - len(prefix)
+        if remaining > 0 and len(traj) > remaining:
+            idxs = torch.linspace(0, len(traj) - 1, steps=remaining).long().tolist()
+            traj = [traj[i] for i in idxs]
+
+        recon_list = prefix + traj
 
         row = []
         for x in recon_list:
             if x.dim() == 3:
-                x = x.unsqueeze(0)   # [1,C,H,W]
+                x = x.unsqueeze(0)
             x = x.detach().cpu().clamp(-1.0, 1.0)
             row.append(x)
 
-        # shape: [K,C,H,W]
         row = torch.cat(row, dim=0)
         processed_rows.append(row)
 
     if len(processed_rows) == 0:
         return
 
-    # all rows must have same number of frames
     num_cols = min(row.shape[0] for row in processed_rows)
     processed_rows = [row[:num_cols] for row in processed_rows]
 
-    # stack rows one after another -> [N*K,C,H,W]
     grid_tensor = torch.cat(processed_rows, dim=0)
 
     grid = make_grid(
@@ -132,7 +128,7 @@ def benchmark_denoiser(
     max_trajectory_frames=10,
     **sampler_kwargs,
 ):
-    csv_path = config["csv_path"] + f"_{sampler_name}.csv"
+    csv_path = config["csv_path"] + f"_{sampler_name}_{operator.name}.csv"
     samples_dir = config.get("samples_dir", "./samples")
     os.makedirs(samples_dir, exist_ok=True)
 
@@ -172,16 +168,18 @@ def benchmark_denoiser(
             writer.writerow([idx, final_psnr, elapsed])
 
             if save_trajectories:
-                all_recon_lists.append(recon_list)
+                row_list = [x0.detach().cpu(), y.detach().cpu()] + [r.detach().cpu() for r in recon_list]
+                all_recon_lists.append(row_list)
 
         if len(psnrs) > 0:
             writer.writerow([])
-            writer.writerow(["mean_psnr", np.mean(psnr_list), "mean_time", np.mean(times)])
-            writer.writerow(["std_psnr", np.std(psnr_list), "std_time", np.std(times)])
+            writer.writerow(["mean_psnr", np.mean(psnrs), "mean_time", np.mean(times)])
+            writer.writerow(["std_psnr", np.std(psnrs), "std_time", np.std(times)])
 
     if save_trajectories and len(all_recon_lists) > 0:
+        
         traj_grid_path = os.path.join(
-            samples_dir, f"{sampler_name}_benchmark_trajectories.png"
+            samples_dir, f"{sampler_name}_{operator.name}_benchmark_trajectories.png"
         )
         save_benchmark_trajectory_grid(
             recon_lists=all_recon_lists,

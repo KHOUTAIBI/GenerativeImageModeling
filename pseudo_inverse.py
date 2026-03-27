@@ -81,10 +81,10 @@ def run(args):
 
     # Operators
     list_operators = list([operator_motion_blur])
-    operator = operator_motion_blur
+    operator = operator_mask
 
-    sigma_noise = diffusion_config.get("sigma_y", 0.01)
-    
+    # noise and samplers
+    sigma_noise = diffusion_config["sigma_y"]    
     sampler = diffusion_config.get("sampler", "ddim").lower()
 
     params = {
@@ -96,6 +96,7 @@ def run(args):
         "device": device,
         "operator": operator,
         "scheduler": scheduler,
+        "max_trajectory_frames" : 10,
     }
 
     if sampler == "ddpm_pseudo_guidance":

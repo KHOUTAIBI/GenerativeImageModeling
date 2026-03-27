@@ -30,12 +30,16 @@ class MaskOperator:
         _, C, H, W = image_shape
 
         if mask_type == "rectangle":
-            hcrop, wcrop = H // 4, W // 2
-            corner_top, corner_left = H // 2, int(0.45 * W)
+
+            hcrop, wcrop = H // 4, W // 4   
+
+            corner_top = int(0.6 * H)       
+            corner_left = int(0.45 * W)     
 
             mask = torch.ones(image_shape, device=device)
             mask[:, :, corner_top:corner_top + hcrop, corner_left:corner_left + wcrop] = 0
-            mask = mask.to(device)
+
+            name = "rectangle"
 
         elif mask_type == "freeform":
             mask = self._generate_freeform_mask(
@@ -47,11 +51,13 @@ class MaskOperator:
                 max_length=max_length,
                 device=device,
             )
+            name = "brush_broom"
 
         else:
             raise ValueError(f"Unknown mask_type: {mask_type}")
     
         self._H = mask
+        self.name = name
 
     def flatten(self, x):
         return x.view(x.shape[0], -1)
@@ -169,6 +175,7 @@ class SuperResolutionOperator:
         self.scale_factor = scale_factor
         self.mode_down = mode_down
         self.mode_up = mode_up
+        self.name = "super_resolution"
 
         _, C, H, W = image_shape
         assert H % scale_factor == 0 and W % scale_factor == 0
@@ -234,6 +241,7 @@ class JPEGCompressionOperator:
         self.m = self.n
         self.device = device
         self.quality = quality
+        self.name = "jpeg_compression"
 
     def flatten(self, x):
         return x.view(x.shape[0], -1)
@@ -303,6 +311,7 @@ class JPEG2000Operator:
         self.wavelet = wavelet
         self.level = level
         self.quant_step = quant_step
+        self.name = "jpeg_wavelet"
 
     def flatten(self, x):
         return x.view(x.shape[0], -1)
@@ -376,6 +385,7 @@ class MotionBlurOperator:
         self.n = int(np.prod(image_shape))
         self.m = self.n
         self.device = device
+        self.name = "motion_blur"
 
         B, C, H, W = image_shape
         self.B = B
