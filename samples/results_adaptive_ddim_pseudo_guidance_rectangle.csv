@@ -1,0 +1,5 @@
+idx,psnr,elapsed_time
+100,29.037992,23.80389952659607
+
+mean_psnr,29.037992,mean_time,23.80389952659607
+std_psnr,0.0,std_time,0.0
