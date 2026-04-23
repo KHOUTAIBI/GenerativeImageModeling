@@ -399,5 +399,5 @@ Images are normalised to $[-1, 1]$. Higher PSNR means the reconstruction is clos
 | **DDPM** — Denoising Diffusion Probabilistic Models | Ho et al. | NeurIPS 2020 | [arxiv 2006.11239](https://arxiv.org/abs/2006.11239) |
 | **DDIM** — Denoising Diffusion Implicit Models | Song et al. | ICLR 2021 | [arxiv 2010.02502](https://arxiv.org/abs/2010.02502) |
 | **DPS** — Diffusion Posterior Sampling for General Noisy Inverse Problems | Chung et al. | ICLR 2023 | [arxiv 2209.14687](https://arxiv.org/abs/2209.14687) |
-| **PiGDM** — Pseudoinverse-Guided Diffusion Models for Inverse Problems | Song et al. | ICLR 2023 | [arxiv 2305.10483](https://arxiv.org/abs/2305.10483) |
+| **PiGDM** — Pseudoinverse-Guided Diffusion Models for Inverse Problems | Song et al. | ICLR 2023 | [Link]([https://arxiv.org/abs/2305.10483](https://openreview.net/forum?id=9_gsMA8MRKQ)) |
 | **Guided Diffusion** — Diffusion Models Beat GANs on Image Synthesis | Dhariwal & Nichol | NeurIPS 2021 | [arxiv 2105.05233](https://arxiv.org/abs/2105.05233) |
